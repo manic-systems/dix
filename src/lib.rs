@@ -28,6 +28,13 @@ pub use diff::{
   write_size_diff,
 };
 
+pub mod snapshot;
+pub use snapshot::{
+  ClosureSnapshot,
+  SnapshotDiffReport,
+  diff_snapshots,
+};
+
 pub mod store;
 
 pub mod version;
@@ -37,6 +44,7 @@ use version::Version;
 ///
 /// Can be created using `StorePath::try_from(path_buf)`.
 #[derive(Deref, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "json", derive(serde::Serialize))]
 pub struct StorePath(PathBuf);
 
 impl TryFrom<PathBuf> for StorePath {
