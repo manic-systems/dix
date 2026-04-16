@@ -12,12 +12,13 @@ use serde::Serialize;
 use crate::{
   diff::{
     Diff,
-    add_selection_status,
-    collect_path_versions,
-    collect_system_names,
-    create_backend,
+    package_diff_report,
   },
-  generate_diffs_from_paths,
+  snapshot::{
+    SnapshotDiffReport,
+    diff_snapshots,
+    gather_snapshot,
+  },
   store::StoreBackend,
 };
 
@@ -26,9 +27,8 @@ pub fn display_diff(
   path_new: &PathBuf,
   force_correctness: bool,
 ) -> Result<()> {
-  let mut connection = create_backend(force_correctness);
-  connection.connect()?;
-  generate_diff(&mut std::io::stdout(), path_old, path_new, &connection)
+  let report = package_diff_report(path_old, path_new, force_correctness)?;
+  write_json_report(&mut std::io::stdout(), report)
 }
 
 fn generate_diff<'a>(
@@ -37,58 +37,20 @@ fn generate_diff<'a>(
   path_new: &PathBuf,
   backend: &impl StoreBackend<'a>,
 ) -> Result<()> {
-  // Query dependencies for old path
-  let paths_old = backend.query_dependents(path_old).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_old.display())
-  })?;
+  let old = gather_snapshot(path_old, backend)
+    .with_context(|| format!("failed to gather snapshot for '{}'", path_old.display()))?;
+  let new = gather_snapshot(path_new, backend)
+    .with_context(|| format!("failed to gather snapshot for '{}'", path_new.display()))?;
+  let report = diff_snapshots(&old, &new)?;
+  write_json_report(out, report)
+}
 
-  // Query dependencies for new path
-  let paths_new = backend.query_dependents(path_new).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_new.display())
-  })?;
-
-  // Query system derivations for old path
-  let system_derivations_old = backend
-    .query_system_derivations(path_old)
-    .with_context(|| {
-      format!(
-        "failed to query system derivations of '{}'",
-        path_old.display()
-      )
-    })?;
-
-  // Query system derivations for new path
-  let system_derivations_new = backend
-    .query_system_derivations(path_new)
-    .with_context(|| {
-      format!(
-        "failed to query system derivations of '{}'",
-        path_new.display()
-      )
-    })?;
-
-  let paths_map = collect_path_versions(paths_old, paths_new);
-  let sys_old_set = collect_system_names(system_derivations_old, "old");
-  let sys_new_set = collect_system_names(system_derivations_new, "new");
-
-  let mut diffs = generate_diffs_from_paths(paths_map);
-  // Make sure the diffs are always in the same order so
-  // our tests testing against the output don't fail nondeterministically.
-  for diff in &mut diffs {
-    diff.new.sort();
-    diff.old.sort();
-  }
-  diffs.sort();
-  add_selection_status(&mut diffs, &sys_old_set, &sys_new_set);
-  let size_old = backend.query_closure_size(path_old)?.bytes();
-  let size_new = backend.query_closure_size(path_new)?.bytes();
-
-  serde_json::to_writer(out, &JsonReport {
-    diffs,
-    size_old,
-    size_new,
-  })
-  .context("Failed to write json output.")
+fn write_json_report(
+  out: &mut dyn Write,
+  report: SnapshotDiffReport,
+) -> Result<()> {
+  serde_json::to_writer(out, &JsonReport::from(report))
+    .context("Failed to write json output.")
 }
 
 #[derive(Serialize)]
@@ -99,6 +61,16 @@ pub struct JsonReport {
   size_old: i64,
   /// new closure size (in bytes)
   size_new: i64,
+}
+
+impl From<SnapshotDiffReport> for JsonReport {
+  fn from(report: SnapshotDiffReport) -> Self {
+    Self {
+      diffs: report.diffs,
+      size_old: report.size_old,
+      size_new: report.size_new,
+    }
+  }
 }
 
 #[cfg(test)]

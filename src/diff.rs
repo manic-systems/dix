@@ -44,6 +44,11 @@ use yansi::{
 use crate::{
   StorePath,
   Version,
+  snapshot::{
+    SnapshotDiffReport,
+    diff_snapshots,
+    gather_snapshot,
+  },
   store::{
     self,
     StoreBackend,
@@ -186,27 +191,15 @@ impl DerivationSelectionStatus {
   }
 }
 
-/// Writes a package diff between two paths to the provided writer.
+/// Computes a package diff report between two paths.
 ///
-/// This function queries the dependencies and system derivations of the
-/// provided paths, and then generates and renders a diff between them.
-///
-/// # Returns
-///
-/// Returns the number of package diffs written.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Failed to connect to the store
-/// - Failed to query dependencies or system derivations
-/// - Failed to write to the output
-pub fn write_package_diff(
-  writer: &mut impl fmt::Write,
+/// This gathers detached closure snapshots from the configured backend and
+/// then reuses `diff_snapshots(...)` for the semantic package diffing step.
+pub fn package_diff_report(
   path_old: &Path,
   path_new: &Path,
   force_correctness: bool,
-) -> Result<usize> {
+) -> Result<SnapshotDiffReport> {
   tracing::debug!(
     old_path = %path_old.display(),
     new_path = %path_new.display(),
@@ -216,57 +209,44 @@ pub fn write_package_diff(
   let mut connection = create_backend(force_correctness);
   connection.connect()?;
 
-  tracing::debug!("querying dependencies for old path");
-  // Query dependencies for old path
-  let paths_old = connection.query_dependents(path_old).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_old.display())
-  })?;
-
-  tracing::debug!("querying dependencies for new path");
-  // Query dependencies for new path
-  let paths_new = connection.query_dependents(path_new).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_new.display())
-  })?;
-
-  tracing::debug!("querying system derivations for old path");
-  // Query system derivations for old path
-  let system_derivations_old = connection
-    .query_system_derivations(path_old)
-    .with_context(|| {
-      format!(
-        "failed to query system derivations of '{}'",
-        path_old.display()
-      )
-    })?;
-
-  tracing::debug!("querying system derivations for new path");
-  // Query system derivations for new path
-  let system_derivations_new = connection
-    .query_system_derivations(path_new)
-    .with_context(|| {
-      format!(
-        "failed to query system derivations of '{}'",
-        path_new.display()
-      )
-    })?;
-
-  writeln!(writer)?;
-
-  // Generate and write the diff
-  tracing::debug!("generating and writing package diff");
-  let count = write_packages_diff(
-    writer,
-    paths_old,
-    paths_new,
-    system_derivations_old,
-    system_derivations_new,
-  )
-  .map_err(Error::from);
-
-  tracing::info!(diff_count = ?count.as_ref().ok(), "package diff complete");
+  let report = (|| {
+    let old = gather_snapshot(path_old, &connection)
+      .with_context(|| format!("failed to gather snapshot for '{}'", path_old.display()))?;
+    let new = gather_snapshot(path_new, &connection)
+      .with_context(|| format!("failed to gather snapshot for '{}'", path_new.display()))?;
+    diff_snapshots(&old, &new)
+  })();
 
   connection.close()?;
+  report
+}
 
+/// Writes a package diff between two paths to the provided writer.
+///
+/// This gathers detached closure snapshots from the configured backend and
+/// renders the resulting semantic package diff.
+///
+/// # Returns
+///
+/// Returns the number of package diffs written.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Failed to connect to the store
+/// - Failed to gather snapshots
+/// - Failed to write to the output
+pub fn write_package_diff(
+  writer: &mut impl fmt::Write,
+  path_old: &Path,
+  path_new: &Path,
+  force_correctness: bool,
+) -> Result<usize> {
+  let report = package_diff_report(path_old, path_new, force_correctness)?;
+
+  writeln!(writer)?;
+  let count = render_diffs(writer, &report.diffs).map_err(Error::from);
+  tracing::info!(diff_count = ?count.as_ref().ok(), "package diff complete");
   count
 }
 
