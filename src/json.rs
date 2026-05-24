@@ -15,10 +15,12 @@ use crate::{
     add_selection_status,
     collect_path_versions,
     collect_system_names,
-    create_backend,
   },
   generate_diffs_from_paths,
-  store::StoreBackend,
+  store::{
+    CombinedStoreBackend,
+    StoreBackend,
+  },
 };
 
 pub fn display_diff(
@@ -26,16 +28,16 @@ pub fn display_diff(
   path_new: &PathBuf,
   force_correctness: bool,
 ) -> Result<()> {
-  let mut connection = create_backend(force_correctness);
+  let mut connection = CombinedStoreBackend::for_correctness(force_correctness);
   connection.connect()?;
   generate_diff(&mut std::io::stdout(), path_old, path_new, &connection)
 }
 
-fn generate_diff<'a>(
+fn generate_diff(
   out: &mut dyn Write,
   path_old: &PathBuf,
   path_new: &PathBuf,
-  backend: &impl StoreBackend<'a>,
+  backend: &impl StoreBackend,
 ) -> Result<()> {
   // Query dependencies for old path
   let paths_old = backend.query_dependents(path_old).with_context(|| {
@@ -106,7 +108,7 @@ mod tests {
 
   use super::*;
   use crate::store::{
-    LazyDBConnection,
+    DbConnection,
     test_utils::{
       self,
       // TestDbBuilder,
@@ -118,7 +120,7 @@ mod tests {
     let db_builder =
       test_utils::create_system_test_db().expect("failed to create test db");
     let db_path = db_builder.db_path().to_string_lossy().to_string();
-    let mut db = LazyDBConnection::new(&db_path);
+    let mut db = DbConnection::new(&db_path);
     db.connect().unwrap();
     let system_old =
       db_builder.resolve_fixture_path(&fixtures::system_path("nixos-25.11"));

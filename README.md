@@ -35,11 +35,11 @@ Options:
           [possible values: auto, always, never]
 
       --force-correctness
-          Fall back to a backend that is focused solely on absolutely guaranteeing correct results at the cost of memory usage and query speed.
+          Fall back to a backend chain that skips SQLite immutable mode.
 
           This is relevant if the output of dix is to be used for more critical applications and not just as human-readable overview.
 
-          In the vast, vast majority of cases, the default backend should be sufficient.
+          The default backend falls back to opening Nix's SQLite database with `?immutable=1` if the normal connection fails. That is faster than Nix commands, but can be inaccurate if the database is being written to at the same time.
 
       --output <OUTPUT>
           Select the output format to use

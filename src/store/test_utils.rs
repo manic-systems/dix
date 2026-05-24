@@ -358,9 +358,8 @@ mod tests {
 
   use super::*;
   use crate::store::{
+    DbConnection,
     StoreBackend,
-    db_eager::EagerDBConnection,
-    db_lazy::LazyDBConnection,
   };
 
   #[test]
@@ -395,13 +394,13 @@ mod tests {
   }
 
   #[test]
-  fn test_eager_query_closure_size() {
+  fn test_db_query_closure_size() {
     let db = create_simple_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let root_fixture = fixtures::store_path("root-package");
     let root = db.resolve_fixture_path(&root_fixture);
 
-    let mut conn = EagerDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
     assert!(conn.connected());
     let size = conn.query_closure_size(&root).unwrap();
@@ -411,89 +410,31 @@ mod tests {
   }
 
   #[test]
-  fn test_lazy_query_closure_size() {
-    let db = create_simple_test_db().unwrap();
-    let db_path = db.db_path().to_string_lossy().to_string();
-    let root_fixture = fixtures::store_path("root-package");
-    let root = db.resolve_fixture_path(&root_fixture);
-
-    let mut conn = LazyDBConnection::new(&db_path);
-    conn.connect().unwrap();
-    assert!(conn.connected());
-    let size = conn.query_closure_size(&root).unwrap();
-    assert_eq!(size, Size::from_bytes(200));
-    conn.close().unwrap();
-    assert!(!conn.connected());
-  }
-
-  #[test]
-  fn test_eager_query_dependents() {
+  fn test_db_query_dependents() {
     let db = create_diamond_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let a_fixture = fixtures::store_path("package-a");
     let a = db.resolve_fixture_path(&a_fixture);
 
-    let mut conn = EagerDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
-    let dependents: Vec<_> = conn.query_dependents(&a).unwrap().collect();
+    let dependents = conn.query_dependents(&a).unwrap();
     assert_eq!(dependents.len(), 4);
     conn.close().unwrap();
   }
 
   #[test]
-  fn test_lazy_query_dependents() {
-    let db = create_diamond_test_db().unwrap();
-    let db_path = db.db_path().to_string_lossy().to_string();
-    let a_fixture = fixtures::store_path("package-a");
-    let a = db.resolve_fixture_path(&a_fixture);
-
-    let mut conn = LazyDBConnection::new(&db_path);
-    conn.connect().unwrap();
-    let dependents: Vec<_> = conn.query_dependents(&a).unwrap().collect();
-    assert_eq!(dependents.len(), 4);
-    conn.close().unwrap();
-  }
-
-  #[test]
-  fn test_eager_query_system_derivations() {
+  fn test_db_query_system_derivations() {
     let db = create_system_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let system_fixture = fixtures::system_path("nixos-25.11");
     let system = db.resolve_fixture_path(&system_fixture);
 
-    let mut conn = EagerDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
-    let derivations: Vec<_> =
-      conn.query_system_derivations(&system).unwrap().collect();
+    let derivations = conn.query_system_derivations(&system).unwrap();
     assert!(!derivations.is_empty());
     conn.close().unwrap();
-  }
-
-  #[test]
-  fn test_lazy_query_system_derivations() {
-    let db = create_system_test_db().unwrap();
-    let db_path = db.db_path().to_string_lossy().to_string();
-    let system_fixture = fixtures::system_path("nixos-25.11");
-    let system = db.resolve_fixture_path(&system_fixture);
-
-    let mut conn = LazyDBConnection::new(&db_path);
-    conn.connect().unwrap();
-    let derivations: Vec<_> =
-      conn.query_system_derivations(&system).unwrap().collect();
-    assert!(!derivations.is_empty());
-    conn.close().unwrap();
-  }
-
-  #[test]
-  fn test_lazy_auto_close_on_drop() {
-    let db = create_simple_test_db().unwrap();
-    let db_path = db.db_path().to_string_lossy().to_string();
-
-    {
-      let mut conn = LazyDBConnection::new(&db_path);
-      conn.connect().unwrap();
-      assert!(conn.connected());
-    }
   }
 
   #[test]
@@ -503,7 +444,7 @@ mod tests {
     let path_fixture = fixtures::store_path("self-referential");
     let path = db.resolve_fixture_path(&path_fixture);
 
-    let mut conn = EagerDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
     let size = conn.query_closure_size(&path).unwrap();
     assert_eq!(size, Size::from_bytes(500));
@@ -515,7 +456,7 @@ mod tests {
     let db = edge_cases::create_circular_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
 
-    let mut conn = EagerDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
     for letter in ["a", "b", "c"] {
       let path = db.resolve_fixture_path(&fixtures::store_path(&format!(
@@ -537,12 +478,12 @@ mod tests {
     let db_path = db.db_path().to_string_lossy().to_string();
     let path = db.resolve_fixture_path(&fixtures::store_path("wide-root"));
 
-    let mut conn = EagerDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
     let size = conn.query_closure_size(&path).unwrap();
     assert_eq!(size, Size::from_bytes(6000)); // 1000 + 100*50
 
-    let dependents: Vec<_> = conn.query_dependents(&path).unwrap().collect();
+    let dependents = conn.query_dependents(&path).unwrap();
     assert_eq!(dependents.len(), 101); // root + 100 children
     conn.close().unwrap();
   }
@@ -553,37 +494,13 @@ mod tests {
     let db_path = db.db_path().to_string_lossy().to_string();
     let path = db.resolve_fixture_path(&fixtures::store_path("deep-0"));
 
-    let mut conn = LazyDBConnection::new(&db_path);
+    let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
     let size = conn.query_closure_size(&path).unwrap();
     assert_eq!(size, Size::from_bytes(10000)); // 100 * 100
 
-    let dependents: Vec<_> = conn.query_dependents(&path).unwrap().collect();
+    let dependents = conn.query_dependents(&path).unwrap();
     assert_eq!(dependents.len(), 100);
     conn.close().unwrap();
-  }
-
-  #[test]
-  fn test_both_backends_produce_same_results() {
-    let db = edge_cases::create_circular_test_db().unwrap();
-    let db_path = db.db_path().to_string_lossy().to_string();
-    let path = db.resolve_fixture_path(&fixtures::store_path("circular-a"));
-
-    let mut eager = EagerDBConnection::new(&db_path);
-    let mut lazy = LazyDBConnection::new(&db_path);
-    eager.connect().unwrap();
-    lazy.connect().unwrap();
-
-    assert_eq!(
-      eager.query_closure_size(&path).unwrap(),
-      lazy.query_closure_size(&path).unwrap()
-    );
-    assert_eq!(
-      eager.query_dependents(&path).unwrap().count(),
-      lazy.query_dependents(&path).unwrap().count()
-    );
-
-    eager.close().unwrap();
-    lazy.close().unwrap();
   }
 }
