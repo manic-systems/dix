@@ -1,12 +1,8 @@
 //! Provides an interface for querying data from the nix store.
 //!
-//! - [`LazyDBConnection`] is a lazy connection the underlying sqlite database.
-//! - [`EagerDBConnection`] is an eager connection the underlying sqlite
-//!   database.
+//! - [`DbConnection`] is a direct connection to the underlying sqlite database.
 //! - [`CommandBackend`] uses nix commands to interact with the store.
-pub mod db_common;
-pub mod db_eager;
-pub mod db_lazy;
+mod db;
 pub mod nix_command;
 mod queries;
 // Make the test db available for the rest of the crate.
@@ -14,12 +10,10 @@ mod queries;
 
 use std::{
   fmt::Display,
-  iter::Iterator,
   path::Path,
 };
 
-pub use db_eager::EagerDBConnection;
-pub use db_lazy::LazyDBConnection;
+pub use db::DbConnection;
 use eyre::{
   Result,
   eyre,
@@ -44,73 +38,67 @@ pub const DATABASE_PATH_IMMUTABLE: &str =
 ///
 /// This allows us to construct a backend that can fall back
 /// to e.g. shell commands should something go wrong.
-pub trait StoreBackend<'a> {
+pub trait StoreBackend: Display {
   fn connect(&mut self) -> Result<()>;
   fn connected(&self) -> bool;
   fn close(&mut self) -> Result<()>;
   fn query_closure_size(&self, path: &Path) -> Result<Size>;
-  fn query_system_derivations(
-    &self,
-    system: &Path,
-  ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>>;
-  fn query_dependents(
-    &self,
-    path: &Path,
-  ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>>;
+  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>>;
+  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>>;
 }
-
-/// wrapper trait for debug information
-pub trait StoreBackendPrintable<'a>: StoreBackend<'a> + Display {}
-
-impl<'a, T> StoreBackendPrintable<'a> for T where T: StoreBackend<'a> + Display {}
 
 /// combines multiple store backends by falling back to the next one if the
 /// current one fails.
 ///
-/// Currently, the first backend that works when connecting is used.
-pub struct CombinedStoreBackend<'a> {
+/// Queries try connected backends in order.
+pub struct CombinedStoreBackend {
   /// The underlying store backend implementations.
-  backends: Vec<Box<dyn StoreBackendPrintable<'a>>>,
+  backends: Vec<Box<dyn StoreBackend>>,
 }
 
-impl<'a> CombinedStoreBackend<'a> {
-  pub fn new(backends: Vec<Box<dyn StoreBackendPrintable<'a>>>) -> Self {
+impl CombinedStoreBackend {
+  pub fn new(backends: Vec<Box<dyn StoreBackend>>) -> Self {
     Self { backends }
   }
 
-  /// Returns a backend that is focused on performance.
+  pub fn for_correctness(force_correctness: bool) -> Self {
+    if force_correctness {
+      Self::default_correct()
+    } else {
+      Self::default_fast()
+    }
+  }
+
+  /// Returns a backend that is focused on performance and availability.
   ///
-  /// The first choice is using direct sqlite queries that
-  /// return the rows lazily, but might skip rows should
-  /// a row conversion after the first row fail. Note that
-  /// this should be extremely unlikely / impossible since
-  /// the current row mappings perform only very basic conversion.
-  pub fn default_lazy() -> Self {
+  /// This first tries the regular sqlite database, then falls back to opening
+  /// it with `immutable=1`, and finally falls back to Nix commands.
+  pub fn default_fast() -> Self {
     CombinedStoreBackend::new(vec![
-      Box::new(LazyDBConnection::new(DATABASE_PATH)),
-      Box::new(EagerDBConnection::new(DATABASE_PATH_IMMUTABLE)),
+      Box::new(DbConnection::new(DATABASE_PATH)),
+      Box::new(DbConnection::new(DATABASE_PATH_IMMUTABLE)),
       Box::new(CommandBackend::default()),
     ])
   }
 
   /// Returns a backend that is focused solely on absolutely guaranteeing
-  /// correct results at the cost of memory usage and database speed.
+  /// correct results if the regular sqlite database cannot be opened.
   ///
   /// Note that [`DATABASE_PATH_IMMUTABLE`] is not used here, since opening
   /// the database can lead to undefined results (also silently with no errors)
   /// if the database is actually modified while opened.
-  pub fn default_eager() -> Self {
+  pub fn default_correct() -> Self {
     CombinedStoreBackend::new(vec![
-      Box::new(EagerDBConnection::new(DATABASE_PATH)),
+      Box::new(DbConnection::new(DATABASE_PATH)),
       Box::new(CommandBackend::default()),
     ])
   }
 
   // tries to execute a query until it succeeds or all connected backends have
   // been tried
-  fn fallback_query<'b, F, Ret>(&'b self, query: F, path: &Path) -> Result<Ret>
+  fn fallback_query<F, Ret>(&self, query: F, path: &Path) -> Result<Ret>
   where
-    F: Fn(&'b Box<dyn StoreBackendPrintable<'a>>, &Path) -> Result<Ret>,
+    F: Fn(&dyn StoreBackend, &Path) -> Result<Ret>,
   {
     let mut combined_err: Option<eyre::Report> = None;
     // attempt to cycle through backends until a successful query is made
@@ -121,7 +109,7 @@ impl<'a> CombinedStoreBackend<'a> {
         );
         continue;
       }
-      let res = query(backend, path);
+      let res = query(backend.as_ref(), path);
       match res {
         Ok(_) => return res,
         Err(err) => {
@@ -142,13 +130,19 @@ impl<'a> CombinedStoreBackend<'a> {
   }
 }
 
-impl Default for CombinedStoreBackend<'_> {
-  fn default() -> Self {
-    Self::default_lazy()
+impl Display for CombinedStoreBackend {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "CombinedStoreBackend({} backends)", self.backends.len())
   }
 }
 
-impl<'a> StoreBackend<'a> for CombinedStoreBackend<'a> {
+impl Default for CombinedStoreBackend {
+  fn default() -> Self {
+    Self::default_fast()
+  }
+}
+
+impl StoreBackend for CombinedStoreBackend {
   /// connects to all backends. Returns an error if all backends fail
   fn connect(&mut self) -> Result<()> {
     tracing::debug!(
@@ -223,28 +217,18 @@ impl<'a> StoreBackend<'a> for CombinedStoreBackend<'a> {
   }
 
   fn query_closure_size(&self, path: &Path) -> Result<Size> {
-    self.fallback_query(
-      |backend, path| (**backend).query_closure_size(path),
-      path,
-    )
+    self.fallback_query(|backend, path| backend.query_closure_size(path), path)
   }
 
-  fn query_system_derivations(
-    &self,
-    system: &Path,
-  ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>> {
+  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     self.fallback_query(
-      |backend, system| (**backend).query_system_derivations(system),
+      |backend, system| backend.query_system_derivations(system),
       system,
     )
   }
 
-  fn query_dependents(
-    &self,
-    path: &Path,
-  ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>> {
-    self
-      .fallback_query(|backend, path| (**backend).query_dependents(path), path)
+  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
+    self.fallback_query(|backend, path| backend.query_dependents(path), path)
   }
 }
 
@@ -283,7 +267,7 @@ mod test {
     }
   }
 
-  impl StoreBackend<'_> for MockStoreBackend {
+  impl StoreBackend for MockStoreBackend {
     fn connect(&mut self) -> Result<()> {
       if self.fail_connect {
         Err(eyre!("Connection failed"))
@@ -314,15 +298,22 @@ mod test {
     fn query_system_derivations(
       &self,
       _system: &Path,
-    ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>> {
-      unimplemented!()
+    ) -> Result<Vec<StorePath>> {
+      *self.query_called.borrow_mut() = true;
+      if self.fail_query {
+        Err(eyre!("Query failed"))
+      } else {
+        Ok(Vec::new())
+      }
     }
 
-    fn query_dependents(
-      &self,
-      _path: &Path,
-    ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>> {
-      unimplemented!()
+    fn query_dependents(&self, _path: &Path) -> Result<Vec<StorePath>> {
+      *self.query_called.borrow_mut() = true;
+      if self.fail_query {
+        Err(eyre!("Query failed"))
+      } else {
+        Ok(Vec::new())
+      }
     }
   }
 
@@ -357,6 +348,19 @@ mod test {
     let res = combined.query_closure_size(Path::new("/dummy"));
     assert!(res.is_ok());
     assert_eq!(res.unwrap(), Size::from_bytes(100));
+  }
+
+  #[test]
+  fn test_path_query_fallback() {
+    let f1 = Box::new(MockStoreBackend::new("f1", false, true));
+    let f2 = Box::new(MockStoreBackend::new("f2", false, false));
+    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
+
+    combined.connect().unwrap();
+
+    let res = combined.query_dependents(Path::new("/dummy"));
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), Vec::new());
   }
 
   #[test]

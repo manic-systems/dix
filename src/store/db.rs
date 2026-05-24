@@ -1,4 +1,13 @@
-use std::path::Path;
+use std::{
+  fmt::{
+    self,
+    Display,
+  },
+  path::{
+    Path,
+    PathBuf,
+  },
+};
 
 use eyre::{
   Context as _,
@@ -12,13 +21,80 @@ use rusqlite::{
 use size::Size;
 
 use crate::{
+  StorePath,
   path_to_canonical_string,
-  store::queries,
+  store::{
+    StoreBackend,
+    queries,
+  },
 };
 
-pub fn default_sqlite_connection(path: &str) -> Result<Connection> {
+#[derive(Debug)]
+pub struct DbConnection {
+  path: String,
+  conn: Option<Connection>,
+}
+
+impl Display for DbConnection {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "DBConnection({})", self.path)
+  }
+}
+
+impl DbConnection {
+  /// Create a new connection.
+  pub fn new(path: impl AsRef<str>) -> Self {
+    Self {
+      path: path.as_ref().to_owned(),
+      conn: None,
+    }
+  }
+
+  /// returns a reference to the inner connection
+  ///
+  /// raises an error if the connection has not been established
+  fn get_inner(&self) -> Result<&Connection> {
+    self
+      .conn
+      .as_ref()
+      .ok_or_else(|| eyre!("Attempted to use database before connecting."))
+  }
+}
+
+impl StoreBackend for DbConnection {
+  fn connect(&mut self) -> Result<()> {
+    self.conn = Some(open_connection(&self.path)?);
+    Ok(())
+  }
+
+  fn connected(&self) -> bool {
+    self.conn.is_some()
+  }
+
+  fn close(&mut self) -> Result<()> {
+    close_inner_connection(&self.path, &mut self.conn)
+  }
+
+  fn query_closure_size(&self, path: &Path) -> Result<size::Size> {
+    query_closure_size(self.get_inner()?, path)
+  }
+
+  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
+    query_store_paths(
+      self.get_inner()?,
+      queries::QUERY_SYSTEM_DERIVATIONS,
+      system,
+    )
+  }
+
+  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
+    query_store_paths(self.get_inner()?, queries::QUERY_DEPENDENTS, path)
+  }
+}
+
+fn open_connection(path: &str) -> Result<Connection> {
   tracing::debug!(database_path = path, "opening sqlite connection");
-  let inner = rusqlite::Connection::open_with_flags(
+  let inner = Connection::open_with_flags(
     path,
     OpenFlags::SQLITE_OPEN_READ_ONLY // We only run queries, safeguard against corrupting the DB.
       | OpenFlags::SQLITE_OPEN_NO_MUTEX // Part of the default flags, rusqlite takes care of locking anyways.
@@ -68,9 +144,7 @@ pub fn default_sqlite_connection(path: &str) -> Result<Connection> {
   Ok(inner)
 }
 
-// FIXME: why is this marked as dead code? It is used by both the lazy
-// and eager backend implementation
-pub fn default_close_inner_connection(
+fn close_inner_connection(
   path: &str,
   maybe_conn: &mut Option<Connection>,
 ) -> Result<()> {
@@ -83,7 +157,7 @@ pub fn default_close_inner_connection(
   })
 }
 
-pub fn query_closure_size(conn: &Connection, path: &Path) -> Result<Size> {
+fn query_closure_size(conn: &Connection, path: &Path) -> Result<Size> {
   tracing::trace!(path = %path.display(), "querying closure size");
   let path = path_to_canonical_string(path)?;
 
@@ -92,4 +166,21 @@ pub fn query_closure_size(conn: &Connection, path: &Path) -> Result<Size> {
     .query_row([path], |row| Ok(Size::from_bytes(row.get::<_, i64>(0)?)))?;
 
   Ok(closure_size)
+}
+
+fn query_store_paths(
+  conn: &Connection,
+  query: &str,
+  path: &Path,
+) -> Result<Vec<StorePath>> {
+  let path = path_to_canonical_string(path)?;
+  let mut query = conn.prepare_cached(query)?;
+  let rows = query.query_map([path], |row| row.get::<_, String>(0))?;
+
+  let mut paths = Vec::new();
+  for row in rows {
+    paths.push(StorePath::try_from(PathBuf::from(row?))?);
+  }
+
+  Ok(paths)
 }

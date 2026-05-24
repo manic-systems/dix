@@ -54,16 +54,6 @@ use crate::{
   },
 };
 
-pub(crate) fn create_backend<'a>(
-  force_correctness: bool,
-) -> store::CombinedStoreBackend<'a> {
-  if force_correctness {
-    store::CombinedStoreBackend::default_eager()
-  } else {
-    store::CombinedStoreBackend::default_lazy()
-  }
-}
-
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(feature = "json", derive(Serialize))]
 pub struct Diff<T = Vec<Version>> {
@@ -213,7 +203,8 @@ pub fn write_package_diff(
     force_correctness = force_correctness,
     "starting package diff computation"
   );
-  let mut connection = create_backend(force_correctness);
+  let mut connection =
+    store::CombinedStoreBackend::for_correctness(force_correctness);
   connection.connect()?;
 
   tracing::debug!("querying dependencies for old path");
@@ -417,18 +408,20 @@ fn count_versions(versions: Vec<Version>) -> HashMap<Version, usize> {
 /// Returns an error if it fails writing to the `writer`
 pub fn write_packages_diff(
   writer: &mut impl fmt::Write,
-  paths_old: impl Iterator<Item = StorePath>,
-  paths_new: impl Iterator<Item = StorePath>,
-  system_paths_old: impl Iterator<Item = StorePath>,
-  system_paths_new: impl Iterator<Item = StorePath>,
+  paths_old: impl IntoIterator<Item = StorePath>,
+  paths_new: impl IntoIterator<Item = StorePath>,
+  system_paths_old: impl IntoIterator<Item = StorePath>,
+  system_paths_new: impl IntoIterator<Item = StorePath>,
 ) -> Result<usize, fmt::Error> {
   let paths_map = collect_path_versions(paths_old, paths_new);
 
   let sys_old_set: HashSet<String> = system_paths_old
+    .into_iter()
     .filter_map(|p| p.parse_name_and_version().ok().map(|(n, _)| n.into()))
     .collect();
 
   let sys_new_set: HashSet<String> = system_paths_new
+    .into_iter()
     .filter_map(|p| p.parse_name_and_version().ok().map(|(n, _)| n.into()))
     .collect();
 
@@ -446,10 +439,11 @@ pub fn write_packages_diff(
 /// Takes an iterator of store paths and extracts the package names,
 /// filtering out any that cannot be parsed. Logs warnings for parse failures.
 pub(crate) fn collect_system_names(
-  paths: impl Iterator<Item = StorePath>,
+  paths: impl IntoIterator<Item = StorePath>,
   context: &str,
 ) -> HashSet<String> {
   paths
+    .into_iter()
     .filter_map(|path| {
       match path.parse_name_and_version() {
         Ok((name, _)) => Some(name.into()),
@@ -468,8 +462,8 @@ pub(crate) fn collect_system_names(
 /// For each package, stores a tuple of (`old_versions`, `new_versions`).
 /// Handles parsing errors by logging warnings and skipping problematic entries.
 pub(crate) fn collect_path_versions(
-  old: impl Iterator<Item = StorePath>,
-  new: impl Iterator<Item = StorePath>,
+  old: impl IntoIterator<Item = StorePath>,
+  new: impl IntoIterator<Item = StorePath>,
 ) -> HashMap<String, (Vec<Version>, Vec<Version>)> {
   let mut paths: HashMap<String, (Vec<Version>, Vec<Version>)> = HashMap::new();
   let mut old_count = 0usize;
@@ -891,7 +885,8 @@ pub fn spawn_size_diff(
   tracing::debug!("calculating closure sizes in background");
 
   thread::spawn(move || {
-    let mut connection = create_backend(force_correctness);
+    let mut connection =
+      store::CombinedStoreBackend::for_correctness(force_correctness);
     connection.connect()?;
 
     let result = (

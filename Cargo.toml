@@ -17,7 +17,6 @@ diff                = "0.1.13"
 itertools           = "0.14.0"
 tracing             = "0.1"
 tracing-subscriber  = { version = "0.3", features = [ "env-filter" ] }
-ouroboros           = "0.18.5"
 pathfinding         = "4.14.0"
 regex               = "1.11.1"
 rusqlite            = { features = [ "bundled" ], version = "0.39.0" }

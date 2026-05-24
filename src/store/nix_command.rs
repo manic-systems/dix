@@ -67,16 +67,21 @@ impl CommandBackend {
   }
 }
 
-fn nix_command_query<'a>(
-  cmd_store: &str,
-  args: &'a [&'a str],
-) -> Result<Box<dyn Iterator<Item = StorePath>>> {
+fn nix_command_query(cmd_store: &str, args: &[&str]) -> Result<Vec<StorePath>> {
   let command_str = format!("{cmd_store} {}", args.join(" "));
   tracing::debug!(command = %command_str, "executing nix command");
   let references = Command::new(cmd_store).args(args).output();
 
   let query = references?;
   tracing::trace!(command = %command_str, "nix command executed successfully");
+  if !query.status.success() {
+    let stderr = String::from_utf8_lossy(&query.stderr);
+    bail!(
+      "nix command exited with non-zero status {status}: {err}",
+      status = query.status,
+      err = stderr.trim()
+    );
+  }
   // We just collect into a vec, as this method of
   // querying data is slow anyways
   let mut paths = Vec::new();
@@ -87,10 +92,10 @@ fn nix_command_query<'a>(
     paths.push(path);
   }
 
-  Ok(Box::new(paths.into_iter()))
+  Ok(paths)
 }
 
-impl StoreBackend<'_> for CommandBackend {
+impl StoreBackend for CommandBackend {
   /// Does nothing (we spawn a new process everytime).
   fn connect(&mut self) -> Result<()> {
     Ok(())
@@ -134,10 +139,7 @@ impl StoreBackend<'_> for CommandBackend {
     }
   }
 
-  fn query_system_derivations(
-    &self,
-    system: &Path,
-  ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>> {
+  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     nix_command_query(&self.nix_cmd, &[
       "--query",
       "--references",
@@ -145,10 +147,7 @@ impl StoreBackend<'_> for CommandBackend {
     ])
   }
 
-  fn query_dependents(
-    &self,
-    path: &Path,
-  ) -> Result<Box<dyn Iterator<Item = StorePath> + '_>> {
+  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
     nix_command_query(&self.nix_cmd, &[
       "--query",
       "--requisites",
@@ -289,8 +288,7 @@ mod tests {
     let (_tmpdir, backend) = setup_fake_nix_command_backend();
     let mut references = backend
       .query_system_derivations(Path::new(FAKE_STORE_PATH))
-      .unwrap()
-      .collect::<Vec<_>>();
+      .unwrap();
     references.sort();
     let mut expected = FAKE_PATHS
       .lines()
@@ -306,8 +304,7 @@ mod tests {
     let (_tmpdir, backend) = setup_fake_nix_command_backend();
     let mut references = backend
       .query_dependents(Path::new(FAKE_STORE_PATH))
-      .unwrap()
-      .collect::<Vec<_>>();
+      .unwrap();
     references.sort();
     let mut expected = FAKE_PATHS
       .lines()
