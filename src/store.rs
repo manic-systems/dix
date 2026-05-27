@@ -124,21 +124,51 @@ impl CombinedStoreBackend {
 
   pub(crate) fn query_with_correctness<T>(
     force_correctness: bool,
-    query: impl FnOnce(&Self) -> Result<T>,
+    query: impl Fn(&dyn StoreBackend) -> Result<T>,
   ) -> Result<T> {
     let mut backend = Self::for_correctness(force_correctness);
-    backend.connect()?;
+    let mut combined_err: Option<eyre::Report> = None;
 
-    let result = query(&backend);
-    let close_result = backend.close();
+    for (i, backend) in backend.backends.iter_mut().enumerate() {
+      tracing::trace!(backend_index = i, backend = %backend, "attempting lazy backend query");
+      if let Err(err) = backend.connect() {
+        warn!(
+          "Unable to connect to store backend {i}: {backend}, trying next. \
+           (error: {err})"
+        );
+        combined_err = match combined_err {
+          Some(combined) => Some(combined.wrap_err(err)),
+          None => Some(err),
+        };
+        continue;
+      }
 
-    match result {
-      Ok(value) => {
-        close_result?;
-        Ok(value)
-      },
-      Err(error) => Err(error),
+      let result = query(backend.as_ref());
+      let close_result = backend.close();
+
+      match result {
+        Ok(value) => {
+          close_result?;
+          return Ok(value);
+        },
+        Err(err) => {
+          warn!(
+            "Failed to query current store backend {backend} ({i}): {}",
+            &err
+          );
+          combined_err = match combined_err {
+            Some(combined) => Some(combined.wrap_err(err)),
+            None => Some(err),
+          };
+          close_result?;
+        },
+      }
     }
+
+    Err(combined_err.map_or_else(
+      || eyre!("No backends to query."),
+      |err| err.wrap_err("All backends failed to query."),
+    ))
   }
 
   /// Returns a backend that is focused on performance and availability.

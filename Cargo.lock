@@ -253,6 +253,7 @@ dependencies = [
  "itertools",
  "pathfinding",
  "proptest",
+ "rustc-hash",
  "serde",
  "size",
  "tracing",

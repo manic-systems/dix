@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-
+use rustc_hash::FxHashSet;
 use size::Size;
 
 use crate::Version;
@@ -23,7 +22,7 @@ impl Package {
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct PackageSnapshot {
   pub packages:       Vec<Package>,
-  pub selected_names: HashSet<String>,
+  pub selected_names: FxHashSet<String>,
   pub closure_size:   Size,
 }
 
@@ -31,12 +30,12 @@ impl PackageSnapshot {
   #[must_use]
   pub fn new(
     packages: impl Into<Vec<Package>>,
-    selected_names: impl Into<HashSet<String>>,
+    selected_names: impl IntoIterator<Item = String>,
     closure_size: Size,
   ) -> Self {
     Self {
       packages: packages.into(),
-      selected_names: selected_names.into(),
+      selected_names: selected_names.into_iter().collect(),
       closure_size,
     }
   }

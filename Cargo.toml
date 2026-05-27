@@ -94,4 +94,4 @@ codegen-units = 1
 
 panic = "abort"
 
-strip = "symbols"
+# strip = "symbols"

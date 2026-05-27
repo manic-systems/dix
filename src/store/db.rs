@@ -3,10 +3,7 @@ use std::{
     self,
     Display,
   },
-  path::{
-    Path,
-    PathBuf,
-  },
+  path::Path,
 };
 
 use eyre::{
@@ -184,7 +181,7 @@ fn query_store_paths(
 
   let mut paths = Vec::new();
   for row in rows {
-    paths.push(StorePath::try_from(PathBuf::from(row?))?);
+    paths.push(StorePath::from_store_path_string(row?)?);
   }
 
   Ok(paths)
@@ -196,7 +193,6 @@ fn query_path_snapshot(
 ) -> Result<StorePathSnapshot> {
   const DEPENDENCY: i64 = 0;
   const SELECTED: i64 = 1;
-  const CLOSURE_SIZE: i64 = 2;
 
   let path = path_to_canonical_string(path)?;
   let mut query = conn.prepare_cached(queries::QUERY_PATH_SNAPSHOT)?;
@@ -209,14 +205,12 @@ fn query_path_snapshot(
     match row.get::<_, i64>(0)? {
       DEPENDENCY => {
         let path = row.get::<_, String>(1)?;
-        dependencies.push(StorePath::try_from(PathBuf::from(path))?);
+        dependencies.push(StorePath::from_store_path_string(path)?);
+        closure_size = Some(closure_size.unwrap_or(0) + row.get::<_, i64>(2)?);
       },
       SELECTED => {
         let path = row.get::<_, String>(1)?;
-        selected.push(StorePath::try_from(PathBuf::from(path))?);
-      },
-      CLOSURE_SIZE => {
-        closure_size = Some(Size::from_bytes(row.get::<_, i64>(2)?));
+        selected.push(StorePath::from_store_path_string(path)?);
       },
       kind => return Err(eyre!("unexpected path snapshot row kind {kind}")),
     }
@@ -225,8 +219,8 @@ fn query_path_snapshot(
   Ok(StorePathSnapshot {
     dependencies,
     selected,
-    closure_size: closure_size.ok_or_else(|| {
+    closure_size: Size::from_bytes(closure_size.ok_or_else(|| {
       eyre!("path snapshot query did not return closure size")
-    })?,
+    })?),
   })
 }

@@ -1,13 +1,13 @@
 use std::{
   cmp,
-  collections::{
-    HashMap,
-    HashSet,
-  },
   hash::BuildHasher,
 };
 
 use itertools::EitherOrBoth;
+use rustc_hash::{
+  FxHashMap,
+  FxHashSet,
+};
 
 use crate::{
   CountedVersion,
@@ -40,8 +40,8 @@ pub(crate) fn diff_snapshots(
 fn build_package_diffs<'a>(
   packages_old: impl IntoIterator<Item = &'a Package>,
   packages_new: impl IntoIterator<Item = &'a Package>,
-  selected_old: &HashSet<String>,
-  selected_new: &HashSet<String>,
+  selected_old: &FxHashSet<String>,
+  selected_new: &FxHashSet<String>,
 ) -> Vec<Diff> {
   let versions_by_name = collect_package_versions(packages_old, packages_new);
   let mut diffs = generate_diffs_from_version_map(versions_by_name);
@@ -61,9 +61,12 @@ pub(crate) fn canonicalize_diffs(diffs: &mut [Diff]) {
 fn collect_package_versions<'a>(
   old: impl IntoIterator<Item = &'a Package>,
   new: impl IntoIterator<Item = &'a Package>,
-) -> HashMap<String, (Vec<Version>, Vec<Version>)> {
-  let mut packages: HashMap<String, (Vec<Version>, Vec<Version>)> =
-    HashMap::new();
+) -> FxHashMap<String, (Vec<Version>, Vec<Version>)> {
+  let old = old.into_iter();
+  let new = new.into_iter();
+  let capacity = old.size_hint().0.saturating_add(new.size_hint().0);
+  let mut packages: FxHashMap<String, (Vec<Version>, Vec<Version>)> =
+    FxHashMap::with_capacity_and_hasher(capacity, Default::default());
   let mut old_count = 0usize;
   let mut new_count = 0usize;
 
@@ -97,8 +100,9 @@ fn collect_package_versions<'a>(
   packages
 }
 
-fn count_versions(versions: Vec<Version>) -> HashMap<Version, usize> {
-  let mut counts = HashMap::new();
+fn count_versions(versions: Vec<Version>) -> FxHashMap<Version, usize> {
+  let mut counts =
+    FxHashMap::with_capacity_and_hasher(versions.len(), Default::default());
   for version in versions {
     *counts.entry(version).or_insert(0) += 1;
   }
@@ -110,7 +114,7 @@ fn counted_version(version: &Version, amount: usize) -> CountedVersion {
 }
 
 fn generate_diffs_from_version_map<S: BuildHasher>(
-  packages: HashMap<String, (Vec<Version>, Vec<Version>), S>,
+  packages: std::collections::HashMap<String, (Vec<Version>, Vec<Version>), S>,
 ) -> Vec<Diff> {
   let mut result = Vec::with_capacity(packages.len());
 
@@ -204,8 +208,8 @@ fn determine_change_status(
 
 fn add_selection_status(
   diffs: &mut [Diff],
-  system_paths_old: &HashSet<String>,
-  system_paths_new: &HashSet<String>,
+  system_paths_old: &FxHashSet<String>,
+  system_paths_new: &FxHashSet<String>,
 ) {
   for diff in diffs {
     diff.selection = DerivationSelectionStatus::from_names(
@@ -224,8 +228,8 @@ mod tests {
     name: &str,
     old: &[&str],
     new: &[&str],
-  ) -> HashMap<String, (Vec<Version>, Vec<Version>)> {
-    let mut packages = HashMap::new();
+  ) -> FxHashMap<String, (Vec<Version>, Vec<Version>)> {
+    let mut packages = FxHashMap::default();
     packages.insert(
       name.to_owned(),
       (
@@ -253,8 +257,8 @@ mod tests {
 
   #[test]
   fn generate_diffs_empty_paths() {
-    let packages: HashMap<String, (Vec<Version>, Vec<Version>)> =
-      HashMap::new();
+    let packages: FxHashMap<String, (Vec<Version>, Vec<Version>)> =
+      FxHashMap::default();
     assert!(generate_diffs_from_version_map(packages).is_empty());
   }
 
@@ -313,7 +317,7 @@ mod tests {
 
   #[test]
   fn generate_diffs_multiple_packages() {
-    let mut packages = HashMap::new();
+    let mut packages = FxHashMap::default();
     packages.insert(
       "pkg-a".to_owned(),
       (vec![Version::new("1.0.0")], vec![Version::new("2.0.0")]),
@@ -325,7 +329,7 @@ mod tests {
     );
 
     let result = generate_diffs_from_version_map(packages);
-    let names: HashSet<_> =
+    let names: FxHashSet<_> =
       result.iter().map(|diff| diff.name.as_str()).collect();
 
     assert_eq!(result.len(), 2);
@@ -382,7 +386,7 @@ mod tests {
     let new_versions: Vec<_> = (50..150)
       .map(|index| Version::new(format!("1.{index}.{index}")))
       .collect();
-    let mut packages = HashMap::new();
+    let mut packages = FxHashMap::default();
     packages.insert("large-pkg".to_owned(), (old_versions, new_versions));
 
     let result = generate_diffs_from_version_map(packages);
@@ -413,10 +417,14 @@ mod tests {
         ..Diff::default()
       },
     ];
-    let old =
-      HashSet::from(["selected".to_owned(), "newly-unselected".to_owned()]);
-    let new =
-      HashSet::from(["selected".to_owned(), "newly-selected".to_owned()]);
+    let old = FxHashSet::from_iter([
+      "selected".to_owned(),
+      "newly-unselected".to_owned(),
+    ]);
+    let new = FxHashSet::from_iter([
+      "selected".to_owned(),
+      "newly-selected".to_owned(),
+    ]);
 
     add_selection_status(&mut diffs, &old, &new);
 

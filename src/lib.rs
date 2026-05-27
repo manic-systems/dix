@@ -28,6 +28,8 @@ pub use render::write_diff_report;
 
 pub mod store;
 
+const ASCII_ALNUM: [bool; 256] = build_ascii_alnum_table();
+
 /// A validated Nix store path.
 ///
 /// Accepts canonical `/nix/store` paths and temporary store paths produced
@@ -77,12 +79,30 @@ impl AsRef<Path> for StorePath {
 }
 
 impl StorePath {
+  pub(crate) fn from_store_path_string(path: String) -> Result<Self> {
+    let parsed = parse_store_path(&path)?;
+    Ok(Self {
+      path: PathBuf::from(path),
+      parsed,
+    })
+  }
+
+  #[cfg(test)]
   pub(crate) fn package_name(&self) -> &str {
     &self.parsed.name
   }
 
+  #[cfg(test)]
   pub(crate) const fn package_version(&self) -> Option<&Version> {
     self.parsed.version.as_ref()
+  }
+
+  pub(crate) fn into_package_name(self) -> String {
+    self.parsed.name
+  }
+
+  pub(crate) fn into_package_parts(self) -> (String, Option<Version>) {
+    (self.parsed.name, self.parsed.version)
   }
 }
 
@@ -150,8 +170,28 @@ fn store_hash_prefix_len(store_name: &str) -> Option<usize> {
 
   bytes[..32]
     .iter()
-    .all(u8::is_ascii_alphanumeric)
+    .all(|byte| ASCII_ALNUM[usize::from(*byte)])
     .then_some(32)
+}
+
+const fn build_ascii_alnum_table() -> [bool; 256] {
+  let mut table = [false; 256];
+  let mut byte = b'0';
+  while byte <= b'9' {
+    table[byte as usize] = true;
+    byte += 1;
+  }
+  byte = b'A';
+  while byte <= b'Z' {
+    table[byte as usize] = true;
+    byte += 1;
+  }
+  byte = b'a';
+  while byte <= b'z' {
+    table[byte as usize] = true;
+    byte += 1;
+  }
+  table
 }
 
 fn split_name_and_version(store_name: &str) -> Result<ParsedStorePath> {
@@ -159,15 +199,16 @@ fn split_name_and_version(store_name: &str) -> Result<ParsedStorePath> {
     bail!("failed to extract name from store path");
   }
 
-  let version_start =
-    store_name
-      .as_bytes()
-      .windows(2)
-      .enumerate()
-      .find_map(|(index, window)| {
-        (index > 0 && window[0] == b'-' && window[1].is_ascii_digit())
-          .then_some(index)
-      });
+  let bytes = store_name.as_bytes();
+  let mut version_start = None;
+  let mut index = 1;
+  while index + 1 < bytes.len() {
+    if bytes[index] == b'-' && bytes[index + 1].is_ascii_digit() {
+      version_start = Some(index);
+      break;
+    }
+    index += 1;
+  }
 
   let Some(version_start) = version_start else {
     return Ok(ParsedStorePath {

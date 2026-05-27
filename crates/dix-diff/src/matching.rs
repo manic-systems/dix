@@ -1,6 +1,5 @@
 use std::{
   cmp::min,
-  collections::HashSet,
   mem::swap,
 };
 
@@ -187,17 +186,21 @@ fn materialize_pairings<'a, T: Ord>(
   assignments: Vec<(usize, usize)>,
   swapped: bool,
 ) -> Vec<EitherOrBoth<&'a T>> {
-  let mut remaining = (0..to.len()).collect::<HashSet<usize>>();
+  let mut remaining = vec![true; to.len()];
   let mut pairings =
     Vec::<EitherOrBoth<&T>>::with_capacity(from.len() + to.len());
 
   for (i, j) in assignments {
     pairings.push(EitherOrBoth::Both(&from[i], &to[j]));
-    remaining.remove(&j);
+    remaining[j] = false;
   }
 
-  if !remaining.is_empty() {
-    let mut remaining = remaining.iter().map(|&j| &to[j]).collect::<Vec<_>>();
+  if remaining.iter().any(|remaining| *remaining) {
+    let mut remaining = remaining
+      .iter()
+      .enumerate()
+      .filter_map(|(index, remaining)| remaining.then_some(&to[index]))
+      .collect::<Vec<_>>();
     remaining.sort_unstable();
     pairings.extend(remaining.into_iter().map(EitherOrBoth::Right));
   }

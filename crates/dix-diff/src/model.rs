@@ -1,8 +1,6 @@
-use std::{
-  cmp,
-  collections::HashSet,
-};
+use std::cmp;
 
+use rustc_hash::FxHashSet;
 #[cfg(feature = "json")] use serde::Serialize;
 
 use crate::CountedVersion;
@@ -89,8 +87,8 @@ pub enum DerivationSelectionStatus {
 impl DerivationSelectionStatus {
   pub(crate) fn from_names(
     name: &str,
-    old: &HashSet<String>,
-    new: &HashSet<String>,
+    old: &FxHashSet<String>,
+    new: &FxHashSet<String>,
   ) -> Self {
     match (old.contains(name), new.contains(name)) {
       (true, true) => Self::Selected,

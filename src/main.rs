@@ -112,10 +112,15 @@ fn main() -> eyre::Result<()> {
 
   tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
 
-  yansi::whenever(match color {
-    clap::ColorChoice::Auto => yansi::Condition::from(should_style),
-    clap::ColorChoice::Always => yansi::Condition::ALWAYS,
-    clap::ColorChoice::Never => yansi::Condition::NEVER,
+  let style_enabled = match color {
+    clap::ColorChoice::Auto => should_style(),
+    clap::ColorChoice::Always => true,
+    clap::ColorChoice::Never => false,
+  };
+  yansi::whenever(if style_enabled {
+    yansi::Condition::ALWAYS
+  } else {
+    yansi::Condition::NEVER
   });
 
   tracing_subscriber::fmt()
@@ -141,7 +146,7 @@ fn main() -> eyre::Result<()> {
         })
         .from_env_lossy(),
     )
-    .with_ansi(should_style())
+    .with_ansi(style_enabled)
     .with_target(false)
     .without_time()
     .init();

@@ -71,20 +71,12 @@ pub const QUERY_PATH_SNAPSHOT: &str = "
       SELECT reference
       FROM Refs
       JOIN systempath ON referrer = systempath.id
-    ),
-    closure_size(bytes) AS (
-      SELECT SUM(narSize)
-      FROM graph
-      JOIN ValidPaths ON ValidPaths.id = graph.id
     )
-  SELECT 0 AS kind, path, NULL AS bytes
+  SELECT 0 AS kind, path, narSize
   FROM graph
   JOIN ValidPaths ON ValidPaths.id = graph.id
 UNION ALL
   SELECT 1 AS kind, path, NULL AS bytes
   FROM selected
   JOIN ValidPaths ON ValidPaths.id = selected.id
-UNION ALL
-  SELECT 2 AS kind, NULL AS path, bytes
-  FROM closure_size;
 ";

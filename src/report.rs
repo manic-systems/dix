@@ -1,5 +1,4 @@
 use std::{
-  collections::HashSet,
   path::{
     Path,
     PathBuf,
@@ -21,7 +20,6 @@ use crate::{
   StorePath,
   store::{
     CombinedStoreBackend,
-    StoreBackend as _,
     StorePathSnapshot,
   },
 };
@@ -71,24 +69,20 @@ fn query_store_path_snapshot(
 fn package_snapshot_from_store(snapshot: StorePathSnapshot) -> PackageSnapshot {
   let packages: Vec<Package> = snapshot
     .dependencies
-    .iter()
+    .into_iter()
     .map(package_from_store_path)
     .collect();
   let selected_names = snapshot
     .selected
     .into_iter()
-    .map(|path| path.package_name().to_owned())
-    .collect::<HashSet<_>>();
+    .map(StorePath::into_package_name);
 
   PackageSnapshot::new(packages, selected_names, snapshot.closure_size)
 }
 
-fn package_from_store_path(path: &StorePath) -> Package {
-  let version = path
-    .package_version()
-    .cloned()
-    .unwrap_or_else(|| "<none>".into());
-  Package::new(path.package_name().to_owned(), version)
+fn package_from_store_path(path: StorePath) -> Package {
+  let (name, version) = path.into_package_parts();
+  Package::new(name, version.unwrap_or_else(|| "<none>".into()))
 }
 
 fn spawn_store_path_snapshot(
