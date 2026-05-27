@@ -69,6 +69,25 @@ impl CombinedStoreBackend {
     }
   }
 
+  pub(crate) fn query_with_correctness<T>(
+    force_correctness: bool,
+    query: impl FnOnce(&Self) -> Result<T>,
+  ) -> Result<T> {
+    let mut backend = Self::for_correctness(force_correctness);
+    backend.connect()?;
+
+    let result = query(&backend);
+    let close_result = backend.close();
+
+    match result {
+      Ok(value) => {
+        close_result?;
+        Ok(value)
+      },
+      Err(error) => Err(error),
+    }
+  }
+
   /// Returns a backend that is focused on performance and availability.
   ///
   /// This first tries the regular sqlite database, then falls back to opening

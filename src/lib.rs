@@ -22,10 +22,12 @@ pub mod diff;
 pub use diff::{
   generate_diffs_from_paths,
   match_version_lists,
-  spawn_size_diff,
-  write_package_diff,
-  write_packages_diff,
-  write_size_diff,
+};
+
+pub mod report;
+pub use report::{
+  DiffReport,
+  write_diff_report,
 };
 
 pub mod store;

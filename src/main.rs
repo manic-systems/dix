@@ -9,7 +9,10 @@ use std::{
     self,
     IsTerminal as _,
   },
-  path::PathBuf,
+  path::{
+    Path,
+    PathBuf,
+  },
 };
 
 use clap::Parser as _;
@@ -156,7 +159,9 @@ fn main() -> eyre::Result<()> {
     },
     #[cfg(not(feature = "json"))]
     OutputFormat::Json => {
-      anyhow::bail!("The 'json' feature is required to use '--json-output'.");
+      return Err(eyre!(
+        "The 'json' feature is required to use '--json-output'."
+      ));
     },
   }
 
@@ -164,8 +169,8 @@ fn main() -> eyre::Result<()> {
 }
 
 fn display_diff(
-  old_path: &PathBuf,
-  new_path: &PathBuf,
+  old_path: &Path,
+  new_path: &Path,
   force_correctness: bool,
 ) -> eyre::Result<()> {
   let mut out = WriteFmt(io::stdout());
@@ -182,33 +187,13 @@ fn display_diff(
     out,
     "{arrows} {new}",
     arrows = ">>>".bold(),
-    new = fs::canonicalize(&new_path)
-      .unwrap_or_else(|_| new_path.clone())
+    new = fs::canonicalize(new_path)
+      .unwrap_or_else(|_| new_path.to_path_buf())
       .display(),
   )?;
 
-  // Handle to the thread collecting closure size information.
-  tracing::debug!("spawning closure size computation thread");
-  let closure_size_handle =
-    dix::spawn_size_diff(old_path.clone(), new_path.clone(), force_correctness);
-
-  tracing::debug!("computing package diff");
-  let wrote =
-    dix::write_package_diff(&mut out, &old_path, &new_path, force_correctness)?;
-
-  tracing::debug!("waiting for closure size thread to complete");
-  let (size_old, size_new) = closure_size_handle.join().map_err(|_| {
-    tracing::error!("closure size thread panicked");
-    eyre!("failed to get closure size due to thread error")
-  })??;
-
-  tracing::info!(size_old = %size_old, size_new = %size_new, "closure sizes computed");
-
-  if wrote > 0 {
-    writeln!(out)?;
-  }
-
-  dix::write_size_diff(&mut out, size_old, size_new)?;
+  let report = dix::DiffReport::query(old_path, new_path, force_correctness)?;
+  dix::write_diff_report(&mut out, &report)?;
 
   tracing::info!("diff computation complete");
 

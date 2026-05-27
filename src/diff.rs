@@ -12,16 +12,11 @@ use std::{
     Write as _,
   },
   mem::swap,
-  path::{
-    Path,
-    PathBuf,
-  },
-  thread,
+  path::Path,
 };
 
 use ::std::hash::BuildHasher;
 use eyre::{
-  Error,
   Result,
   WrapErr as _,
 };
@@ -34,7 +29,6 @@ use pathfinding::{
   matrix::Matrix,
 };
 #[cfg(feature = "json")] use serde::Serialize;
-use size::Size;
 use unicode_width::UnicodeWidthStr as _;
 use yansi::{
   Paint as _,
@@ -44,10 +38,7 @@ use yansi::{
 use crate::{
   StorePath,
   Version,
-  store::{
-    self,
-    StoreBackend,
-  },
+  store::StoreBackend,
   version::{
     VersionComponent,
     VersionPiece,
@@ -176,52 +167,23 @@ impl DerivationSelectionStatus {
   }
 }
 
-/// Writes a package diff between two paths to the provided writer.
-///
-/// This function queries the dependencies and system derivations of the
-/// provided paths, and then generates and renders a diff between them.
-///
-/// # Returns
-///
-/// Returns the number of package diffs written.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Failed to connect to the store
-/// - Failed to query dependencies or system derivations
-/// - Failed to write to the output
-pub fn write_package_diff(
-  writer: &mut impl fmt::Write,
+pub(crate) fn query_package_diffs(
+  backend: &impl StoreBackend,
   path_old: &Path,
   path_new: &Path,
-  force_correctness: bool,
-) -> Result<usize> {
-  tracing::debug!(
-    old_path = %path_old.display(),
-    new_path = %path_new.display(),
-    force_correctness = force_correctness,
-    "starting package diff computation"
-  );
-  let mut connection =
-    store::CombinedStoreBackend::for_correctness(force_correctness);
-  connection.connect()?;
-
+) -> Result<Vec<Diff>> {
   tracing::debug!("querying dependencies for old path");
-  // Query dependencies for old path
-  let paths_old = connection.query_dependents(path_old).with_context(|| {
+  let paths_old = backend.query_dependents(path_old).with_context(|| {
     format!("failed to query dependencies of '{}'", path_old.display())
   })?;
 
   tracing::debug!("querying dependencies for new path");
-  // Query dependencies for new path
-  let paths_new = connection.query_dependents(path_new).with_context(|| {
+  let paths_new = backend.query_dependents(path_new).with_context(|| {
     format!("failed to query dependencies of '{}'", path_new.display())
   })?;
 
   tracing::debug!("querying system derivations for old path");
-  // Query system derivations for old path
-  let system_derivations_old = connection
+  let system_derivations_old = backend
     .query_system_derivations(path_old)
     .with_context(|| {
       format!(
@@ -231,8 +193,7 @@ pub fn write_package_diff(
     })?;
 
   tracing::debug!("querying system derivations for new path");
-  // Query system derivations for new path
-  let system_derivations_new = connection
+  let system_derivations_new = backend
     .query_system_derivations(path_new)
     .with_context(|| {
       format!(
@@ -241,24 +202,12 @@ pub fn write_package_diff(
       )
     })?;
 
-  writeln!(writer)?;
-
-  // Generate and write the diff
-  tracing::debug!("generating and writing package diff");
-  let count = write_packages_diff(
-    writer,
+  Ok(build_package_diffs(
     paths_old,
     paths_new,
     system_derivations_old,
     system_derivations_new,
-  )
-  .map_err(Error::from);
-
-  tracing::info!(diff_count = ?count.as_ref().ok(), "package diff complete");
-
-  connection.close()?;
-
-  count
+  ))
 }
 
 /// Computes the Levenshtein distance between two slices.
@@ -401,18 +350,12 @@ fn count_versions(versions: Vec<Version>) -> HashMap<Version, usize> {
   counts
 }
 
-/// Entry point for writing package differences.
-///
-/// # Errors
-///
-/// Returns an error if it fails writing to the `writer`
-pub fn write_packages_diff(
-  writer: &mut impl fmt::Write,
+fn build_package_diffs(
   paths_old: impl IntoIterator<Item = StorePath>,
   paths_new: impl IntoIterator<Item = StorePath>,
   system_paths_old: impl IntoIterator<Item = StorePath>,
   system_paths_new: impl IntoIterator<Item = StorePath>,
-) -> Result<usize, fmt::Error> {
+) -> Vec<Diff> {
   let paths_map = collect_path_versions(paths_old, paths_new);
 
   let sys_old_set: HashSet<String> = system_paths_old
@@ -429,31 +372,25 @@ pub fn write_packages_diff(
   add_selection_status(&mut diffs, &sys_old_set, &sys_new_set);
 
   diffs
+}
+
+pub(crate) fn canonicalize_diffs(diffs: &mut [Diff]) {
+  for diff in diffs.iter_mut() {
+    diff.new.sort();
+    diff.old.sort();
+  }
+  diffs.sort();
+}
+
+pub(crate) fn render_package_diffs(
+  writer: &mut impl fmt::Write,
+  diffs: &[Diff],
+) -> Result<usize, fmt::Error> {
+  let mut diffs = diffs.iter().collect::<Vec<_>>();
+  diffs
     .sort_by(|a, b| a.status.cmp(&b.status).then_with(|| a.name.cmp(&b.name)));
 
   render_diffs(writer, &diffs)
-}
-
-/// Collects package names from system paths
-///
-/// Takes an iterator of store paths and extracts the package names,
-/// filtering out any that cannot be parsed. Logs warnings for parse failures.
-pub(crate) fn collect_system_names(
-  paths: impl IntoIterator<Item = StorePath>,
-  context: &str,
-) -> HashSet<String> {
-  paths
-    .into_iter()
-    .filter_map(|path| {
-      match path.parse_name_and_version() {
-        Ok((name, _)) => Some(name.into()),
-        Err(error) => {
-          tracing::warn!("error parsing {context} system path name: {error}");
-          None
-        },
-      }
-    })
-    .collect()
 }
 
 /// Collects and organizes versions from old and new paths
@@ -521,7 +458,7 @@ pub(crate) fn collect_path_versions(
 /// Returns the number of diffs rendered on success.
 fn render_diffs(
   writer: &mut impl fmt::Write,
-  diffs: &[Diff],
+  diffs: &[&Diff],
 ) -> Result<usize, fmt::Error> {
   // Calculate width needed for aligning package names
   let name_width = diffs
@@ -864,80 +801,6 @@ fn fmt_version_piece_pair(
     },
   }
   Ok(())
-}
-
-/// Spawns a background task to compute the closure sizes required by
-/// [`write_size_diff`].
-///
-/// This function offloads the potentially expensive operation of calculating
-/// closure sizes to a separate thread, allowing the main thread to continue
-/// with other work while these calculations are performed.
-///
-/// # Returns
-///
-/// Returns a join handle that will resolve to the sizes when complete.
-#[must_use]
-pub fn spawn_size_diff(
-  path_old: PathBuf,
-  path_new: PathBuf,
-  force_correctness: bool,
-) -> thread::JoinHandle<Result<(Size, Size)>> {
-  tracing::debug!("calculating closure sizes in background");
-
-  thread::spawn(move || {
-    let mut connection =
-      store::CombinedStoreBackend::for_correctness(force_correctness);
-    connection.connect()?;
-
-    let result = (
-      connection.query_closure_size(&path_old)?,
-      connection.query_closure_size(&path_new)?,
-    );
-
-    connection.close()?;
-
-    Ok::<_, Error>(result)
-  })
-}
-
-/// Writes a formatted size difference between two sizes to the provided writer.
-///
-/// This function displays both the absolute sizes (old → new) and the
-/// difference between them, with appropriate coloring (red for size increase,
-/// green for size decrease).
-///
-/// # Returns
-///
-/// Returns `Ok(())` when successful.
-///
-/// # Errors
-///
-/// Returns `Err` when writing to `writer` fails.
-pub fn write_size_diff(
-  writer: &mut impl fmt::Write,
-  size_old: Size,
-  size_new: Size,
-) -> fmt::Result {
-  let size_diff = size_new - size_old;
-
-  writeln!(
-    writer,
-    "{header}: {size_old} -> {size_new}",
-    header = "SIZE".bold(),
-    size_old = size_old.red(),
-    size_new = size_new.green(),
-  )?;
-
-  writeln!(
-    writer,
-    "{header}: {size_diff}",
-    header = "DIFF".bold(),
-    size_diff = if size_diff.bytes() > 0 {
-      size_diff.green()
-    } else {
-      size_diff.red()
-    },
-  )
 }
 
 /// Generates diff objects from a mapping of package names to old and new

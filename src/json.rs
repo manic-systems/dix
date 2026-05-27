@@ -1,6 +1,6 @@
 use std::{
   io::Write,
-  path::PathBuf,
+  path::Path,
 };
 
 use eyre::{
@@ -10,133 +10,84 @@ use eyre::{
 use serde::Serialize;
 
 use crate::{
-  diff::{
-    Diff,
-    add_selection_status,
-    collect_path_versions,
-    collect_system_names,
-  },
-  generate_diffs_from_paths,
-  store::{
-    CombinedStoreBackend,
-    StoreBackend,
-  },
+  diff::Diff,
+  report::DiffReport,
 };
 
 pub fn display_diff(
-  path_old: &PathBuf,
-  path_new: &PathBuf,
+  path_old: &Path,
+  path_new: &Path,
   force_correctness: bool,
 ) -> Result<()> {
-  let mut connection = CombinedStoreBackend::for_correctness(force_correctness);
-  connection.connect()?;
-  generate_diff(&mut std::io::stdout(), path_old, path_new, &connection)
+  let report = DiffReport::query(path_old, path_new, force_correctness)?;
+  generate_diff(&mut std::io::stdout(), &report)
 }
 
-fn generate_diff(
-  out: &mut dyn Write,
-  path_old: &PathBuf,
-  path_new: &PathBuf,
-  backend: &impl StoreBackend,
-) -> Result<()> {
-  // Query dependencies for old path
-  let paths_old = backend.query_dependents(path_old).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_old.display())
-  })?;
-
-  // Query dependencies for new path
-  let paths_new = backend.query_dependents(path_new).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_new.display())
-  })?;
-
-  // Query system derivations for old path
-  let system_derivations_old = backend
-    .query_system_derivations(path_old)
-    .with_context(|| {
-      format!(
-        "failed to query system derivations of '{}'",
-        path_old.display()
-      )
-    })?;
-
-  // Query system derivations for new path
-  let system_derivations_new = backend
-    .query_system_derivations(path_new)
-    .with_context(|| {
-      format!(
-        "failed to query system derivations of '{}'",
-        path_new.display()
-      )
-    })?;
-
-  let paths_map = collect_path_versions(paths_old, paths_new);
-  let sys_old_set = collect_system_names(system_derivations_old, "old");
-  let sys_new_set = collect_system_names(system_derivations_new, "new");
-
-  let mut diffs = generate_diffs_from_paths(paths_map);
-  // Make sure the diffs are always in the same order so
-  // our tests testing against the output don't fail nondeterministically.
-  for diff in &mut diffs {
-    diff.new.sort();
-    diff.old.sort();
-  }
-  diffs.sort();
-  add_selection_status(&mut diffs, &sys_old_set, &sys_new_set);
-  let size_old = backend.query_closure_size(path_old)?.bytes();
-  let size_new = backend.query_closure_size(path_new)?.bytes();
-
-  serde_json::to_writer(out, &JsonReport {
-    diffs,
-    size_old,
-    size_new,
-  })
-  .context("Failed to write json output.")
+fn generate_diff(out: &mut dyn Write, report: &DiffReport) -> Result<()> {
+  serde_json::to_writer(out, &JsonReport::from(report))
+    .context("Failed to write json output.")
 }
 
 #[derive(Serialize)]
-pub struct JsonReport {
+pub struct JsonReport<'a> {
   /// package changes
-  diffs:    Vec<Diff>,
+  diffs:    &'a [Diff],
   /// old closure size (in bytes)
   size_old: i64,
   /// new closure size (in bytes)
   size_new: i64,
 }
 
+impl<'a> From<&'a DiffReport> for JsonReport<'a> {
+  fn from(report: &'a DiffReport) -> Self {
+    Self {
+      diffs:    report.diffs.as_slice(),
+      size_old: report.size_old.bytes(),
+      size_new: report.size_new.bytes(),
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
 
+  use size::Size;
+
   use super::*;
-  use crate::store::{
-    DbConnection,
-    test_utils::{
-      self,
-      // TestDbBuilder,
-      fixtures,
+  use crate::{
+    Version,
+    diff::{
+      Change,
+      DerivationSelectionStatus,
+      DiffStatus,
     },
   };
+
   #[test]
   fn test_basic_json_output_format() {
-    let db_builder =
-      test_utils::create_system_test_db().expect("failed to create test db");
-    let db_path = db_builder.db_path().to_string_lossy().to_string();
-    let mut db = DbConnection::new(&db_path);
-    db.connect().unwrap();
-    let system_old =
-      db_builder.resolve_fixture_path(&fixtures::system_path("nixos-25.11"));
-    let system_new =
-      db_builder.resolve_fixture_path(&fixtures::system_path("nixos-25.12"));
-
     let expected_output = r#"{"diffs":[{"name":"nixos","old":[{"name":"25.11-system-path","amount":1},{"name":"25.11-system","amount":1}],"new":[{"name":"25.12-system-path","amount":1},{"name":"25.12-system","amount":1}],"status":{"Changed":"Upgraded"},"selection":"Unselected","has_common_versions":false}],"size_old":115001000,"size_new":115001000}"#;
 
+    let report = DiffReport {
+      diffs:    vec![Diff {
+        name:                "nixos".to_owned(),
+        old:                 vec![
+          Version::new("25.11-system-path"),
+          Version::new("25.11-system"),
+        ],
+        new:                 vec![
+          Version::new("25.12-system-path"),
+          Version::new("25.12-system"),
+        ],
+        status:              DiffStatus::Changed(Change::Upgraded),
+        selection:           DerivationSelectionStatus::Unselected,
+        has_common_versions: false,
+      }],
+      size_old: Size::from_bytes(115_001_000),
+      size_new: Size::from_bytes(115_001_000),
+    };
+
     let mut actual_output = Vec::new();
-    generate_diff(
-      &mut actual_output,
-      &PathBuf::from(system_old),
-      &PathBuf::from(system_new),
-      &db,
-    )
-    .unwrap();
+    generate_diff(&mut actual_output, &report).unwrap();
     let actual_output = String::from_utf8(actual_output).unwrap();
     assert_eq!(expected_output, &actual_output);
   }
