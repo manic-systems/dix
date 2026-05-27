@@ -46,12 +46,12 @@ struct Cli {
   )]
   color: clap::ColorChoice,
 
-  /// Fall back to a backend chain that skips SQLite immutable mode.
+  /// Fall back to a backend chain that skips `SQLite` immutable mode.
   ///
   /// This is relevant if the output of dix is to be used for more
   /// critical applications and not just as human-readable overview.
   ///
-  /// The default backend falls back to opening Nix's SQLite database with
+  /// The default backend falls back to opening Nix's `SQLite` database with
   /// `?immutable=1` if the normal connection fails. That is faster than Nix
   /// commands, but can be inaccurate if the database is being written to at
   /// the same time.
@@ -117,10 +117,8 @@ fn main() -> eyre::Result<()> {
     .with_env_filter(
       tracing_subscriber::EnvFilter::builder()
         .with_default_directive(match verbose.log_level_filter() {
-          clap_verbosity_flag::log::LevelFilter::Off => {
-            tracing::Level::ERROR.into()
-          },
-          clap_verbosity_flag::log::LevelFilter::Error => {
+          clap_verbosity_flag::log::LevelFilter::Off
+          | clap_verbosity_flag::log::LevelFilter::Error => {
             tracing::Level::ERROR.into()
           },
           clap_verbosity_flag::log::LevelFilter::Warn => {

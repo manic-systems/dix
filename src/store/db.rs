@@ -25,6 +25,7 @@ use crate::{
   path_to_canonical_string,
   store::{
     StoreBackend,
+    StorePathSnapshot,
     queries,
   },
 };
@@ -89,6 +90,10 @@ impl StoreBackend for DbConnection {
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
     query_store_paths(self.get_inner()?, queries::QUERY_DEPENDENTS, path)
+  }
+
+  fn query_path_snapshot(&self, path: &Path) -> Result<StorePathSnapshot> {
+    query_path_snapshot(self.get_inner()?, path)
   }
 }
 
@@ -183,4 +188,45 @@ fn query_store_paths(
   }
 
   Ok(paths)
+}
+
+fn query_path_snapshot(
+  conn: &Connection,
+  path: &Path,
+) -> Result<StorePathSnapshot> {
+  const DEPENDENCY: i64 = 0;
+  const SELECTED: i64 = 1;
+  const CLOSURE_SIZE: i64 = 2;
+
+  let path = path_to_canonical_string(path)?;
+  let mut query = conn.prepare_cached(queries::QUERY_PATH_SNAPSHOT)?;
+  let mut rows = query.query([path])?;
+  let mut dependencies = Vec::new();
+  let mut selected = Vec::new();
+  let mut closure_size = None;
+
+  while let Some(row) = rows.next()? {
+    match row.get::<_, i64>(0)? {
+      DEPENDENCY => {
+        let path = row.get::<_, String>(1)?;
+        dependencies.push(StorePath::try_from(PathBuf::from(path))?);
+      },
+      SELECTED => {
+        let path = row.get::<_, String>(1)?;
+        selected.push(StorePath::try_from(PathBuf::from(path))?);
+      },
+      CLOSURE_SIZE => {
+        closure_size = Some(Size::from_bytes(row.get::<_, i64>(2)?));
+      },
+      kind => return Err(eyre!("unexpected path snapshot row kind {kind}")),
+    }
+  }
+
+  Ok(StorePathSnapshot {
+    dependencies,
+    selected,
+    closure_size: closure_size.ok_or_else(|| {
+      eyre!("path snapshot query did not return closure size")
+    })?,
+  })
 }

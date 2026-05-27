@@ -228,9 +228,10 @@ version = "1.4.2"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
- "derive_more",
+ "diff",
  "dix-diff",
  "eyre",
+ "itertools",
  "proptest",
  "rusqlite",
  "serde",
@@ -239,6 +240,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "unicode-width",
  "yansi",
 ]
 
@@ -247,15 +249,12 @@ name = "dix-diff"
 version = "1.4.2"
 dependencies = [
  "derive_more",
- "diff",
  "itertools",
  "pathfinding",
  "proptest",
  "serde",
  "size",
  "tracing",
- "unicode-width",
- "yansi",
 ]
 
 [[package]]

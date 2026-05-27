@@ -44,3 +44,47 @@ pub const QUERY_CLOSURE_SIZE: &str = "
   SELECT SUM(narSize) as sum from graph
   JOIN ValidPaths ON p = id;
 ";
+
+pub const QUERY_PATH_SNAPSHOT: &str = "
+  WITH RECURSIVE
+    root(id) AS (
+      SELECT id
+      FROM ValidPaths
+      WHERE path = ?1
+    ),
+    graph(id) AS (
+      SELECT id
+      FROM root
+    UNION
+      SELECT reference
+      FROM Refs
+      JOIN graph ON referrer = graph.id
+    ),
+    systempath(id) AS (
+      SELECT reference
+      FROM root
+      JOIN Refs ON root.id = referrer
+      JOIN ValidPaths ON ValidPaths.id = reference
+      WHERE path LIKE '%-system-path'
+    ),
+    selected(id) AS (
+      SELECT reference
+      FROM Refs
+      JOIN systempath ON referrer = systempath.id
+    ),
+    closure_size(bytes) AS (
+      SELECT SUM(narSize)
+      FROM graph
+      JOIN ValidPaths ON ValidPaths.id = graph.id
+    )
+  SELECT 0 AS kind, path, NULL AS bytes
+  FROM graph
+  JOIN ValidPaths ON ValidPaths.id = graph.id
+UNION ALL
+  SELECT 1 AS kind, path, NULL AS bytes
+  FROM selected
+  JOIN ValidPaths ON ValidPaths.id = selected.id
+UNION ALL
+  SELECT 2 AS kind, NULL AS path, bytes
+  FROM closure_size;
+";

@@ -12,7 +12,7 @@ use eyre::Result;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-/// Test database builder for creating temporary SQLite databases
+/// Test database builder for creating temporary `SQLite` databases
 /// with the Nix store schema.
 pub struct TestDbBuilder {
   temp_dir: TempDir,
@@ -100,7 +100,7 @@ impl TestDbBuilder {
       .ok()?;
     drop(stmt);
 
-    conn.close().map_err(|(_, err)| err).ok();
+    let _ = conn.close().map_err(|(_, err)| err);
     Some(id)
   }
 
@@ -434,6 +434,23 @@ mod tests {
     conn.connect().unwrap();
     let derivations = conn.query_system_derivations(&system).unwrap();
     assert!(!derivations.is_empty());
+    conn.close().unwrap();
+  }
+
+  #[test]
+  fn test_db_query_path_snapshot() {
+    let db = create_system_test_db().unwrap();
+    let db_path = db.db_path().to_string_lossy().to_string();
+    let system_fixture = fixtures::system_path("nixos-25.11");
+    let system = db.resolve_fixture_path(&system_fixture);
+
+    let mut conn = DbConnection::new(&db_path);
+    conn.connect().unwrap();
+    let snapshot = conn.query_path_snapshot(&system).unwrap();
+
+    assert_eq!(snapshot.dependencies.len(), 6);
+    assert_eq!(snapshot.selected.len(), 2);
+    assert_eq!(snapshot.closure_size, Size::from_bytes(115_001_000));
     conn.close().unwrap();
   }
 

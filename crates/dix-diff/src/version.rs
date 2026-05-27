@@ -8,6 +8,8 @@ use derive_more::{
   Display,
 };
 #[cfg(feature = "json")] use serde::Serialize;
+#[cfg(feature = "json")]
+use serde::ser::SerializeStruct as _;
 
 /// Separators used to split version strings.
 const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
@@ -16,15 +18,13 @@ const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "json", derive(Serialize))]
 pub struct Version {
-  pub name:   String,
-  pub amount: usize,
+  pub name: String,
 }
 
 impl Version {
   pub fn new(version: impl Into<String>) -> Self {
     Self {
-      name:   version.into(),
-      amount: 1,
+      name: version.into(),
     }
   }
 
@@ -56,6 +56,7 @@ impl Ord for Version {
   fn cmp(&self, other: &Self) -> cmp::Ordering {
     let mut self_components = self.components();
     let mut other_components = other.components();
+    let mut compared_common_components = false;
 
     loop {
       match (self_components.next(), other_components.next()) {
@@ -64,8 +65,13 @@ impl Ord for Version {
           if ord != cmp::Ordering::Equal {
             return ord;
           }
+          compared_common_components = true;
         },
         (Some(extra_self_component), None) => {
+          if !compared_common_components {
+            return cmp::Ordering::Greater;
+          }
+
           // Self has extra components - if they're non-numeric, self is a
           // pre-release.
           return if !extra_self_component.is_numeric()
@@ -77,6 +83,10 @@ impl Ord for Version {
           };
         },
         (None, Some(extra_other_component)) => {
+          if !compared_common_components {
+            return cmp::Ordering::Less;
+          }
+
           // Other has extra components - if they're non-numeric, other is a
           // pre-release.
           return if !extra_other_component.is_numeric()
@@ -216,11 +226,7 @@ impl Ord for VersionComponent<'_> {
 
 impl fmt::Display for Version {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    if self.amount > 1 {
-      write!(f, "{} ×{}", self.name, self.amount)
-    } else {
-      f.write_str(&self.name)
-    }
+    f.write_str(&self.name)
   }
 }
 
@@ -235,11 +241,72 @@ impl fmt::Write for Version {
   }
 }
 
+/// A version plus the number of times it appears in a diff result.
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct CountedVersion {
+  pub version: Version,
+  pub amount:  usize,
+}
+
+impl CountedVersion {
+  #[must_use]
+  pub fn new(version: impl Into<Version>, amount: usize) -> Self {
+    Self {
+      version: version.into(),
+      amount,
+    }
+  }
+
+  #[must_use]
+  pub fn single(version: impl Into<Version>) -> Self {
+    Self::new(version, 1)
+  }
+}
+
+impl<T: Into<Version>> From<T> for CountedVersion {
+  fn from(version: T) -> Self {
+    Self::single(version)
+  }
+}
+
+impl<'a> IntoIterator for &'a CountedVersion {
+  type Item = VersionPiece<'a>;
+  type IntoIter = Pieces<'a>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    self.version.iter()
+  }
+}
+
+impl fmt::Display for CountedVersion {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if self.amount > 1 {
+      write!(f, "{} ×{}", self.version, self.amount)
+    } else {
+      self.version.fmt(f)
+    }
+  }
+}
+
+#[cfg(feature = "json")]
+impl Serialize for CountedVersion {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    let mut state = serializer.serialize_struct("CountedVersion", 2)?;
+    state.serialize_field("name", &self.version.name)?;
+    state.serialize_field("amount", &self.amount)?;
+    state.end()
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use proptest::proptest;
 
   use super::{
+    CountedVersion,
     Version,
     VersionComponent,
     VersionPiece,
@@ -434,8 +501,7 @@ mod tests {
     let v1 = Version::new("1.2.3");
     assert_eq!(format!("{v1}"), "1.2.3");
 
-    let mut v2 = Version::new("1.2.3");
-    v2.amount = 5;
+    let v2 = CountedVersion::new("1.2.3", 5);
     assert_eq!(format!("{v2}"), "1.2.3 ×5");
   }
 
@@ -452,6 +518,12 @@ mod tests {
   fn empty_version() {
     let v = Version::new("");
     assert_eq!(v.components().count(), 0);
+  }
+
+  #[test]
+  fn empty_version_orders_before_non_empty_versions() {
+    assert!(Version::new("") < Version::new("0"));
+    assert!(Version::new("") < Version::new("alpha"));
   }
 
   #[test]
@@ -498,7 +570,6 @@ mod tests {
     let v2 = v1.clone();
     assert_eq!(v1, v2);
     assert_eq!(v1.name, v2.name);
-    assert_eq!(v1.amount, v2.amount);
   }
 
   #[test]
@@ -513,5 +584,15 @@ mod tests {
     set.insert(v1);
     assert!(set.contains(&v2));
     assert!(!set.contains(&v3));
+  }
+
+  #[test]
+  fn counted_version_tracks_amount_outside_version_identity() {
+    let one = CountedVersion::single("1.2.3");
+    let many = CountedVersion::new("1.2.3", 5);
+
+    assert_eq!(one.version, many.version);
+    assert_ne!(one, many);
+    assert_eq!(many.to_string(), "1.2.3 ×5");
   }
 }

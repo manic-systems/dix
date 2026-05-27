@@ -10,6 +10,7 @@ use std::{
 use itertools::EitherOrBoth;
 
 use crate::{
+  CountedVersion,
   Version,
   matching::match_version_lists,
   model::{
@@ -98,21 +99,14 @@ fn collect_package_versions<'a>(
 
 fn count_versions(versions: Vec<Version>) -> HashMap<Version, usize> {
   let mut counts = HashMap::new();
-  for mut version in versions {
-    let amount = version.amount;
-    if amount == 0 {
-      continue;
-    }
-    version.amount = 1;
-    *counts.entry(version).or_insert(0) += amount;
+  for version in versions {
+    *counts.entry(version).or_insert(0) += 1;
   }
   counts
 }
 
-fn version_with_amount(version: &Version, amount: usize) -> Version {
-  let mut version = version.clone();
-  version.amount = amount;
-  version
+fn counted_version(version: &Version, amount: usize) -> CountedVersion {
+  CountedVersion::new(version.clone(), amount)
 }
 
 fn generate_diffs_from_version_map<S: BuildHasher>(
@@ -136,7 +130,7 @@ fn generate_diffs_from_version_map<S: BuildHasher>(
 
       has_common_versions |= old_count.min(new_count) > 0;
       if removed_count > 0 {
-        unique_old.push(version_with_amount(old_version, removed_count));
+        unique_old.push(counted_version(old_version, removed_count));
       }
     }
 
@@ -146,7 +140,7 @@ fn generate_diffs_from_version_map<S: BuildHasher>(
       let added_count = new_count.saturating_sub(old_count);
 
       if added_count > 0 {
-        unique_new.push(version_with_amount(new_version, added_count));
+        unique_new.push(counted_version(new_version, added_count));
       }
     }
 
@@ -177,8 +171,8 @@ fn generate_diffs_from_version_map<S: BuildHasher>(
 }
 
 fn determine_change_status(
-  old_versions: &[Version],
-  new_versions: &[Version],
+  old_versions: &[CountedVersion],
+  new_versions: &[CountedVersion],
 ) -> Option<DiffStatus> {
   let mut saw_upgrade = false;
   let mut saw_downgrade = false;
@@ -188,7 +182,7 @@ fn determine_change_status(
       EitherOrBoth::Left(_) => saw_downgrade = true,
       EitherOrBoth::Right(_) => saw_upgrade = true,
       EitherOrBoth::Both(old, new) => {
-        match old.cmp(new) {
+        match old.version.cmp(&new.version) {
           cmp::Ordering::Less => saw_upgrade = true,
           cmp::Ordering::Greater => saw_downgrade = true,
           cmp::Ordering::Equal => {},
@@ -249,10 +243,12 @@ mod tests {
     diffs.pop().expect("expected exactly one diff")
   }
 
-  fn version_with_test_amount(version: &str, amount: usize) -> Version {
-    let mut version = Version::new(version);
-    version.amount = amount;
-    version
+  fn counted(version: &str) -> CountedVersion {
+    CountedVersion::single(version)
+  }
+
+  fn counted_with_amount(version: &str, amount: usize) -> CountedVersion {
+    CountedVersion::new(version, amount)
   }
 
   #[test]
@@ -279,7 +275,7 @@ mod tests {
     assert_eq!(diff.name, "new-pkg");
     assert_eq!(diff.status, DiffStatus::Added);
     assert!(diff.old.is_empty());
-    assert_eq!(diff.new, vec![Version::new("1.0.0")]);
+    assert_eq!(diff.new, vec![counted("1.0.0")]);
   }
 
   #[test]
@@ -288,7 +284,7 @@ mod tests {
 
     assert_eq!(diff.name, "old-pkg");
     assert_eq!(diff.status, DiffStatus::Removed);
-    assert_eq!(diff.old, vec![Version::new("1.0.0")]);
+    assert_eq!(diff.old, vec![counted("1.0.0")]);
     assert!(diff.new.is_empty());
   }
 
@@ -297,8 +293,8 @@ mod tests {
     let diff = diff_for("pkg", &["1.0.0"], &["2.0.0"]);
 
     assert_eq!(diff.status, DiffStatus::Changed(Change::Upgraded));
-    assert_eq!(diff.old, vec![Version::new("1.0.0")]);
-    assert_eq!(diff.new, vec![Version::new("2.0.0")]);
+    assert_eq!(diff.old, vec![counted("1.0.0")]);
+    assert_eq!(diff.new, vec![counted("2.0.0")]);
   }
 
   #[test]
@@ -352,7 +348,7 @@ mod tests {
 
     assert!(diff.has_common_versions);
     assert_eq!(diff.status, DiffStatus::Changed(Change::UpgradeDowngrade));
-    assert_eq!(diff.old, vec![version_with_test_amount("1.0.0", 2)]);
+    assert_eq!(diff.old, vec![counted_with_amount("1.0.0", 2)]);
     assert!(diff.new.is_empty());
   }
 
@@ -363,7 +359,7 @@ mod tests {
     assert!(diff.has_common_versions);
     assert_eq!(diff.status, DiffStatus::Changed(Change::UpgradeDowngrade));
     assert!(diff.old.is_empty());
-    assert_eq!(diff.new, vec![version_with_test_amount("1.0.0", 2)]);
+    assert_eq!(diff.new, vec![counted_with_amount("1.0.0", 2)]);
   }
 
   #[test]

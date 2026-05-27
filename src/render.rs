@@ -6,6 +6,16 @@ use std::{
   },
 };
 
+use dix_diff::{
+  Change,
+  CountedVersion,
+  DerivationSelectionStatus,
+  Diff,
+  DiffReport,
+  DiffStatus,
+  VersionPiece,
+  match_counted_version_lists,
+};
 use itertools::{
   EitherOrBoth,
   Itertools,
@@ -16,19 +26,60 @@ use yansi::{
   Painted,
 };
 
-use crate::{
-  Version,
-  matching::match_version_lists,
-  model::{
-    Change,
-    DerivationSelectionStatus,
-    Diff,
-    DiffStatus,
-  },
-  version::VersionPiece,
-};
+/// Writes a full diff report to the provided writer.
+///
+/// # Returns
+///
+/// Returns the number of package diffs written.
+///
+/// # Errors
+///
+/// Returns an error if writing to the output fails.
+pub fn write_diff_report(
+  writer: &mut impl fmt::Write,
+  report: &DiffReport,
+) -> Result<usize, fmt::Error> {
+  writeln!(writer)?;
 
-pub(crate) fn render_package_diffs(
+  let wrote = render_package_diffs(writer, &report.diffs)?;
+
+  if wrote > 0 {
+    writeln!(writer)?;
+  }
+
+  write_size_diff(writer, report.size_old, report.size_new)?;
+
+  Ok(wrote)
+}
+
+fn write_size_diff(
+  writer: &mut impl fmt::Write,
+  size_old: size::Size,
+  size_new: size::Size,
+) -> fmt::Result {
+  let size_diff = size_new - size_old;
+
+  writeln!(
+    writer,
+    "{header}: {size_old} -> {size_new}",
+    header = "SIZE".bold(),
+    size_old = size_old.red(),
+    size_new = size_new.green(),
+  )?;
+
+  writeln!(
+    writer,
+    "{header}: {size_diff}",
+    header = "DIFF".bold(),
+    size_diff = if size_diff.bytes() > 0 {
+      size_diff.green()
+    } else {
+      size_diff.red()
+    },
+  )
+}
+
+fn render_package_diffs(
   writer: &mut impl fmt::Write,
   diffs: &[Diff],
 ) -> Result<usize, fmt::Error> {
@@ -112,19 +163,19 @@ fn selection_char(status: DerivationSelectionStatus) -> Painted<&'static char> {
 }
 
 fn fmt_version_diffs(
-  old_versions: &[Version],
-  new_versions: &[Version],
+  old_versions: &[CountedVersion],
+  new_versions: &[CountedVersion],
   has_common_versions: bool,
 ) -> Result<(String, String), fmt::Error> {
   let mut old_acc = String::with_capacity(
     old_versions
       .iter()
-      .fold(0, |acc, version| acc + version.name.len() + 2),
+      .fold(0, |acc, version| acc + version.version.name.len() + 2),
   );
   let mut new_acc = String::with_capacity(
     new_versions
       .iter()
-      .fold(0, |acc, version| acc + version.name.len() + 2),
+      .fold(0, |acc, version| acc + version.version.name.len() + 2),
   );
 
   let mut old_wrote = false;
@@ -140,7 +191,7 @@ fn fmt_version_diffs(
   };
 
   #[expect(clippy::redundant_closure_for_method_calls)]
-  for diff in match_version_lists(old_versions, new_versions) {
+  for diff in match_counted_version_lists(old_versions, new_versions) {
     match diff {
       EitherOrBoth::Left(old) => {
         append_sep(&mut old_acc, &mut old_wrote)?;
@@ -193,13 +244,13 @@ fn write_version_piece(
 fn fmt_single_version_diff(
   old_acc: &mut String,
   new_acc: &mut String,
-  old_ver: &Version,
-  new_ver: &Version,
+  old_ver: &CountedVersion,
+  new_ver: &CountedVersion,
 ) -> fmt::Result {
   let old_parts: Vec<_> = old_ver.into_iter().collect();
   let new_parts: Vec<_> = new_ver.into_iter().collect();
 
-  if (old_parts.is_empty() && new_parts.is_empty()) || (old_ver == new_ver) {
+  if (old_parts.is_empty() && new_parts.is_empty()) || old_ver == new_ver {
     return Ok(());
   }
 

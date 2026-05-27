@@ -12,14 +12,11 @@ readme      = "../../README.md"
 
 [dependencies]
 derive_more   = { features = [ "full" ], version = "2.0.1" }
-diff          = "0.1.13"
 itertools     = "0.14.0"
 pathfinding   = "4.14.0"
 serde         = { features = [ "derive" ], optional = true, version = "1.0.228" }
 size          = "0.5.0"
 tracing       = "0.1"
-unicode-width = "0.2.0"
-yansi         = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
 
 [dev-dependencies]
 proptest = "1.6.0"

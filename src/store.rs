@@ -34,17 +34,68 @@ pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 pub const DATABASE_PATH_IMMUTABLE: &str =
   "file:/nix/var/nix/db/db.sqlite?immutable=1";
 
+/// Store-level data needed to build a package diff snapshot.
+#[derive(Debug)]
+pub struct StorePathSnapshot {
+  pub dependencies: Vec<StorePath>,
+  pub selected:     Vec<StorePath>,
+  pub closure_size: Size,
+}
+
 /// Defines an interface for interacting with a Nix database.
 ///
 /// This allows us to construct a backend that can fall back
 /// to e.g. shell commands should something go wrong.
 pub trait StoreBackend: Display {
+  /// Connects the backend.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the backend cannot be initialized.
   fn connect(&mut self) -> Result<()>;
+
   fn connected(&self) -> bool;
+
+  /// Closes the backend.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if closing the backend fails.
   fn close(&mut self) -> Result<()>;
+
+  /// Queries the total closure size for a store path.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the path cannot be queried.
   fn query_closure_size(&self, path: &Path) -> Result<Size>;
+
+  /// Queries the direct system derivations for a system path.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the system derivations cannot be queried.
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>>;
+
+  /// Queries the transitive closure for a store path.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the dependency closure cannot be queried.
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>>;
+
+  /// Queries all store data needed to build one diff snapshot.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if any part of the snapshot cannot be queried.
+  fn query_path_snapshot(&self, path: &Path) -> Result<StorePathSnapshot> {
+    Ok(StorePathSnapshot {
+      dependencies: self.query_dependents(path)?,
+      selected:     self.query_system_derivations(path)?,
+      closure_size: self.query_closure_size(path)?,
+    })
+  }
 }
 
 /// combines multiple store backends by falling back to the next one if the
@@ -57,10 +108,12 @@ pub struct CombinedStoreBackend {
 }
 
 impl CombinedStoreBackend {
+  #[must_use]
   pub fn new(backends: Vec<Box<dyn StoreBackend>>) -> Self {
     Self { backends }
   }
 
+  #[must_use]
   pub fn for_correctness(force_correctness: bool) -> Self {
     if force_correctness {
       Self::default_correct()
@@ -92,8 +145,9 @@ impl CombinedStoreBackend {
   ///
   /// This first tries the regular sqlite database, then falls back to opening
   /// it with `immutable=1`, and finally falls back to Nix commands.
+  #[must_use]
   pub fn default_fast() -> Self {
-    CombinedStoreBackend::new(vec![
+    Self::new(vec![
       Box::new(DbConnection::new(DATABASE_PATH)),
       Box::new(DbConnection::new(DATABASE_PATH_IMMUTABLE)),
       Box::new(CommandBackend::default()),
@@ -106,8 +160,9 @@ impl CombinedStoreBackend {
   /// Note that [`DATABASE_PATH_IMMUTABLE`] is not used here, since opening
   /// the database can lead to undefined results (also silently with no errors)
   /// if the database is actually modified while opened.
+  #[must_use]
   pub fn default_correct() -> Self {
-    CombinedStoreBackend::new(vec![
+    Self::new(vec![
       Box::new(DbConnection::new(DATABASE_PATH)),
       Box::new(CommandBackend::default()),
     ])
@@ -248,6 +303,10 @@ impl StoreBackend for CombinedStoreBackend {
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
     self.fallback_query(|backend, path| backend.query_dependents(path), path)
+  }
+
+  fn query_path_snapshot(&self, path: &Path) -> Result<StorePathSnapshot> {
+    self.fallback_query(|backend, path| backend.query_path_snapshot(path), path)
   }
 }
 

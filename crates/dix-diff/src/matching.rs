@@ -11,12 +11,29 @@ use pathfinding::{
 };
 
 use crate::{
+  CountedVersion,
   Version,
   version::{
     VersionComponent,
     VersionPiece,
   },
 };
+
+pub(crate) trait VersionSource {
+  fn version(&self) -> &Version;
+}
+
+impl VersionSource for Version {
+  fn version(&self) -> &Version {
+    self
+  }
+}
+
+impl VersionSource for CountedVersion {
+  fn version(&self) -> &Version {
+    &self.version
+  }
+}
 
 /// Computes the Levenshtein distance between two slices.
 pub(crate) fn levenshtein<T: Eq>(from: &[T], to: &[T]) -> usize {
@@ -51,18 +68,25 @@ pub(crate) fn levenshtein<T: Eq>(from: &[T], to: &[T]) -> usize {
   prev[to_len]
 }
 
-fn version_edit_distance(from: &Version, to: &Version) -> usize {
+fn version_edit_distance<T: VersionSource>(from: &T, to: &T) -> usize {
   let from_components: Vec<_> = from
+    .version()
     .into_iter()
     .filter_map(VersionPiece::component)
     .collect();
-  let to_components: Vec<_> =
-    to.into_iter().filter_map(VersionPiece::component).collect();
+  let to_components: Vec<_> = to
+    .version()
+    .into_iter()
+    .filter_map(VersionPiece::component)
+    .collect();
 
   levenshtein(&from_components, &to_components)
 }
 
-fn closest_version_index(source: &Version, candidates: &[Version]) -> usize {
+fn closest_version_index<T: VersionSource>(
+  source: &T,
+  candidates: &[T],
+) -> usize {
   let mut best_index = 0;
   let mut best_distance = version_edit_distance(source, &candidates[0]);
 
@@ -77,123 +101,50 @@ fn closest_version_index(source: &Version, candidates: &[Version]) -> usize {
   best_index
 }
 
-fn match_single_left<'a>(
-  source: &'a Version,
-  candidates: &'a [Version],
-) -> Vec<EitherOrBoth<&'a Version>> {
-  let best_index = closest_version_index(source, candidates);
-  let mut pairings = Vec::with_capacity(candidates.len());
+fn version_assignments<T>(from: &[T], to: &[T]) -> Vec<(usize, usize)>
+where
+  T: VersionSource + PartialEq,
+{
+  if from == to {
+    return (0..from.len()).map(|index| (index, index)).collect();
+  }
 
-  pairings.push(EitherOrBoth::Both(source, &candidates[best_index]));
+  if from.len() == 1 {
+    return vec![(0, closest_version_index(&from[0], to))];
+  }
 
-  let mut remaining = candidates
-    .iter()
-    .enumerate()
-    .filter_map(|(index, version)| (index != best_index).then_some(version))
-    .collect::<Vec<_>>();
-  remaining.sort_unstable();
-  pairings.extend(remaining.into_iter().map(EitherOrBoth::Right));
+  if from.len() == 2 && to.len() == 2 {
+    return two_by_two_assignments(from, to);
+  }
 
-  pairings
+  hungarian_assignments(from, to)
 }
 
-fn match_single_right<'a>(
-  candidates: &'a [Version],
-  source: &'a Version,
-) -> Vec<EitherOrBoth<&'a Version>> {
-  let best_index = closest_version_index(source, candidates);
-  let mut pairings = Vec::with_capacity(candidates.len());
-
-  pairings.push(EitherOrBoth::Both(&candidates[best_index], source));
-
-  let mut remaining = candidates
-    .iter()
-    .enumerate()
-    .filter_map(|(index, version)| (index != best_index).then_some(version))
-    .collect::<Vec<_>>();
-  remaining.sort_unstable();
-  pairings.extend(remaining.into_iter().map(EitherOrBoth::Left));
-
-  pairings
-}
-
-fn match_two_by_two<'a>(
-  from: &'a [Version],
-  to: &'a [Version],
-) -> Vec<EitherOrBoth<&'a Version>> {
+fn two_by_two_assignments<T: VersionSource>(
+  from: &[T],
+  to: &[T],
+) -> Vec<(usize, usize)> {
   let direct_cost = version_edit_distance(&from[0], &to[0])
     .saturating_add(version_edit_distance(&from[1], &to[1]));
   let crossed_cost = version_edit_distance(&from[0], &to[1])
     .saturating_add(version_edit_distance(&from[1], &to[0]));
 
   if direct_cost <= crossed_cost {
-    vec![
-      EitherOrBoth::Both(&from[0], &to[0]),
-      EitherOrBoth::Both(&from[1], &to[1]),
-    ]
+    vec![(0, 0), (1, 1)]
   } else {
-    vec![
-      EitherOrBoth::Both(&from[0], &to[1]),
-      EitherOrBoth::Both(&from[1], &to[0]),
-    ]
+    vec![(0, 1), (1, 0)]
   }
 }
 
-/// Takes two lists of versions and tries to match them using the Hungarian
-/// algorithm. The matching attempts to minimize the edit distance between
-/// version pairs, which means:
-///
-/// 1. Versions with minimal edit distance are paired
-/// 2. The natural ordering of versions is preserved where possible
-///
-/// Returns a vector of paired or unpaired versions (as `EitherOrBoth` enum).
-pub(crate) fn match_version_lists<'a>(
-  mut from: &'a [Version],
-  mut to: &'a [Version],
-) -> Vec<EitherOrBoth<&'a Version>> {
-  // Early return for empty inputs
-  if from.is_empty() {
-    return to.iter().map(EitherOrBoth::Right).collect();
-  }
-  if to.is_empty() {
-    return from.iter().map(EitherOrBoth::Left).collect();
-  }
-
-  // Quick paths for common small cases that do not need the assignment solver.
-  if from.len() == 1 && to.len() == 1 {
-    return vec![EitherOrBoth::Both(&from[0], &to[0])];
-  }
-  if from == to {
-    return from
-      .iter()
-      .zip(to)
-      .map(|(from, to)| EitherOrBoth::Both(from, to))
-      .collect();
-  }
-  if from.len() == 1 {
-    return match_single_left(&from[0], to);
-  }
-  if to.len() == 1 {
-    return match_single_right(from, &to[0]);
-  }
-  if from.len() == 2 && to.len() == 2 {
-    return match_two_by_two(from, to);
-  }
-
-  // Hungarian algorithm requires #rows <= #columns
-  // Since the edit distance is symmetric, we can swap inputs if needed
-  let swapped = if from.len() > to.len() {
-    (to, from) = (from, to);
-    true
-  } else {
-    false
-  };
-
-  // Pre-extract version components to avoid repetitive extraction
+fn hungarian_assignments<T: VersionSource>(
+  from: &[T],
+  to: &[T],
+) -> Vec<(usize, usize)> {
   let from_components: Vec<Vec<VersionComponent>> = from
     .iter()
     .map(|version| {
       version
+        .version()
         .into_iter()
         .filter_map(VersionPiece::component)
         .collect()
@@ -204,6 +155,7 @@ pub(crate) fn match_version_lists<'a>(
     .iter()
     .map(|version| {
       version
+        .version()
         .into_iter()
         .filter_map(VersionPiece::component)
         .collect()
@@ -212,7 +164,6 @@ pub(crate) fn match_version_lists<'a>(
 
   let mut distances = Matrix::new(from.len(), to.len(), 0_i32);
 
-  // Compute all distances directly into the matrix
   for i in 0..from.len() {
     for j in 0..to.len() {
       distances[(i, j)] =
@@ -224,33 +175,81 @@ pub(crate) fn match_version_lists<'a>(
     }
   }
 
-  // Apply Hungarian algorithm to find optimal pairings
   let (_cost, matchings) =
     kuhn_munkres::kuhn_munkres_min::<i32, Matrix<i32>>(&distances);
 
-  // Process matched pairs
+  matchings.into_iter().enumerate().collect()
+}
+
+fn materialize_pairings<'a, T: Ord>(
+  from: &'a [T],
+  to: &'a [T],
+  assignments: Vec<(usize, usize)>,
+  swapped: bool,
+) -> Vec<EitherOrBoth<&'a T>> {
   let mut remaining = (0..to.len()).collect::<HashSet<usize>>();
   let mut pairings =
-    Vec::<EitherOrBoth<&Version>>::with_capacity(from.len() + to.len());
+    Vec::<EitherOrBoth<&T>>::with_capacity(from.len() + to.len());
 
-  for (i, j) in matchings.into_iter().enumerate() {
+  for (i, j) in assignments {
     pairings.push(EitherOrBoth::Both(&from[i], &to[j]));
     remaining.remove(&j);
   }
 
-  // Add unmatched items from 'to' list
   if !remaining.is_empty() {
     let mut remaining = remaining.iter().map(|&j| &to[j]).collect::<Vec<_>>();
     remaining.sort_unstable();
     pairings.extend(remaining.into_iter().map(EitherOrBoth::Right));
   }
 
-  // Restore original ordering if we swapped the inputs
   if swapped {
-    pairings = pairings.into_iter().map(EitherOrBoth::flip).collect();
+    pairings.into_iter().map(EitherOrBoth::flip).collect()
+  } else {
+    pairings
+  }
+}
+
+/// Takes two lists of versions and tries to match them using the Hungarian
+/// algorithm. The matching attempts to minimize the edit distance between
+/// version pairs, which means:
+///
+/// 1. Versions with minimal edit distance are paired
+/// 2. The natural ordering of versions is preserved where possible
+///
+/// Returns a vector of paired or unpaired versions (as `EitherOrBoth` enum).
+pub(crate) fn match_version_lists<'a, T>(
+  mut from: &'a [T],
+  mut to: &'a [T],
+) -> Vec<EitherOrBoth<&'a T>>
+where
+  T: VersionSource + PartialEq + Ord,
+{
+  // Early return for empty inputs
+  if from.is_empty() {
+    return to.iter().map(EitherOrBoth::Right).collect();
+  }
+  if to.is_empty() {
+    return from.iter().map(EitherOrBoth::Left).collect();
   }
 
-  pairings
+  // Hungarian algorithm requires #rows <= #columns
+  // Since the edit distance is symmetric, we can swap inputs if needed
+  let swapped = if from.len() > to.len() {
+    (to, from) = (from, to);
+    true
+  } else {
+    false
+  };
+
+  let assignments = version_assignments(from, to);
+  materialize_pairings(from, to, assignments, swapped)
+}
+
+pub fn match_counted_version_lists<'a>(
+  from: &'a [CountedVersion],
+  to: &'a [CountedVersion],
+) -> Vec<EitherOrBoth<&'a CountedVersion>> {
+  match_version_lists(from, to)
 }
 
 #[cfg(test)]

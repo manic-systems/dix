@@ -5,11 +5,11 @@ use std::{
 
 #[cfg(feature = "json")] use serde::Serialize;
 
-use crate::Version;
+use crate::CountedVersion;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(feature = "json", derive(Serialize))]
-pub struct Diff<T = Vec<Version>> {
+pub struct Diff<T = Vec<CountedVersion>> {
   pub name:                String,
   pub old:                 T,
   pub new:                 T,

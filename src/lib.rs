@@ -1,9 +1,11 @@
-use std::path::{
-  Path,
-  PathBuf,
+use std::{
+  ops::Deref,
+  path::{
+    Path,
+    PathBuf,
+  },
 };
 
-use derive_more::Deref;
 use dix_diff::Version;
 use eyre::{
   Context as _,
@@ -16,57 +18,81 @@ use eyre::{
 
 #[cfg(feature = "json")] pub mod json;
 
-pub use dix_diff::{
-  DiffReport,
-  write_diff_report,
-};
+pub use dix_diff::DiffReport;
 
 pub mod report;
 pub use report::query_diff_report;
 
+mod render;
+pub use render::write_diff_report;
+
 pub mod store;
 
-/// A validated store path. Always starts with `/nix/store`.
+/// A validated Nix store path.
 ///
-/// Can be created using `StorePath::try_from(path_buf)`.
-#[derive(Deref, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct StorePath(PathBuf);
+/// Accepts canonical `/nix/store` paths and temporary store paths produced
+/// under `/tmp`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StorePath {
+  path:   PathBuf,
+  parsed: ParsedStorePath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct ParsedStorePath {
+  name:    String,
+  version: Option<Version>,
+}
 
 impl TryFrom<PathBuf> for StorePath {
   type Error = Error;
 
   fn try_from(path: PathBuf) -> Result<Self> {
     tracing::trace!(path = %path.display(), "validating store path");
-    if !(path.starts_with("/nix/store") || path.starts_with("/tmp/")) {
-      tracing::warn!(path = %path.display(), "path does not start with /nix/store or /tmp/");
-      bail!(
-        "path {path} must start with /nix/store or /tmp/",
+    let path_text = path.to_str().with_context(|| {
+      format!(
+        "failed to convert path '{path}' to valid unicode",
         path = path.display(),
-      );
-    }
+      )
+    })?;
+    let parsed = parse_store_path(path_text)?;
+
     tracing::trace!(path = %path.display(), "store path validated");
-    Ok(Self(path))
+    Ok(Self { path, parsed })
+  }
+}
+
+impl Deref for StorePath {
+  type Target = Path;
+
+  fn deref(&self) -> &Self::Target {
+    &self.path
+  }
+}
+
+impl AsRef<Path> for StorePath {
+  fn as_ref(&self) -> &Path {
+    &self.path
   }
 }
 
 impl StorePath {
-  /// Parses a Nix store path to extract the packages name and possibly its
-  /// version.
-  fn parse_name_and_version(&self) -> Result<(&str, Option<Version>)> {
-    let path = self.to_str().with_context(|| {
-      format!(
-        "failed to convert path '{path}' to valid unicode",
-        path = self.display(),
-      )
-    })?;
-
-    let store_name = store_name_from_path(path)?;
-    let (name, version) = split_name_and_version(store_name)?;
-
-    tracing::trace!(name = name, version = ?version, "parsed name and version from path");
-
-    Ok((name, version))
+  pub(crate) fn package_name(&self) -> &str {
+    &self.parsed.name
   }
+
+  pub(crate) const fn package_version(&self) -> Option<&Version> {
+    self.parsed.version.as_ref()
+  }
+}
+
+fn parse_store_path(path: &str) -> Result<ParsedStorePath> {
+  let store_name = store_name_from_path(path)?;
+  let parsed = split_name_and_version(store_name)?;
+
+  tracing::trace!(name = parsed.name.as_str(), version = ?parsed.version, "parsed name and version from path");
+
+  Ok(parsed)
 }
 
 fn store_name_from_path(path: &str) -> Result<&str> {
@@ -128,28 +154,32 @@ fn store_hash_prefix_len(store_name: &str) -> Option<usize> {
     .then_some(32)
 }
 
-fn split_name_and_version(store_name: &str) -> Result<(&str, Option<Version>)> {
+fn split_name_and_version(store_name: &str) -> Result<ParsedStorePath> {
   if store_name.is_empty() {
     bail!("failed to extract name from store path");
   }
 
-  let version_start = store_name
-    .as_bytes()
-    .windows(2)
-    .position(|window| window[0] == b'-' && window[1].is_ascii_digit());
+  let version_start =
+    store_name
+      .as_bytes()
+      .windows(2)
+      .enumerate()
+      .find_map(|(index, window)| {
+        (index > 0 && window[0] == b'-' && window[1].is_ascii_digit())
+          .then_some(index)
+      });
 
   let Some(version_start) = version_start else {
-    return Ok((store_name, None));
+    return Ok(ParsedStorePath {
+      name:    store_name.to_owned(),
+      version: None,
+    });
   };
 
-  if version_start == 0 {
-    bail!("failed to extract name from store path");
-  }
-
-  Ok((
-    &store_name[..version_start],
-    Some(Version::from(store_name[version_start + 1..].to_owned())),
-  ))
+  Ok(ParsedStorePath {
+    name:    store_name[..version_start].to_owned(),
+    version: Some(Version::from(store_name[version_start + 1..].to_owned())),
+  })
 }
 
 fn path_to_canonical_string(path: &Path) -> Result<String> {
@@ -186,8 +216,8 @@ mod tests {
     #[test]
     fn parses_valid_paths(s in r"((/nix/store/)|(/tmp/.+?/))[a-z0-9A-Z]{32}-.+([0-9][-a-z0-9A-Z\.]*)?") {
       let path = PathBuf::from(s);
-      let store_path = StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-      let (_name, _version) = store_path.parse_name_and_version().expect("Failed to get name and version");
+      let store_path = StorePath::try_from(path).expect("Failed to create StorePath");
+      assert!(!store_path.package_name().is_empty());
     }
   }
 
@@ -199,8 +229,7 @@ mod tests {
       PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path =
       StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-    let inner = store_path.0;
-    assert_eq!(inner, path)
+    assert_eq!(store_path.as_ref(), path.as_path());
   }
 
   #[test]
@@ -209,8 +238,7 @@ mod tests {
       PathBuf::from("/tmp/test123/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path =
       StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-    let inner = store_path.0;
-    assert_eq!(inner, path)
+    assert_eq!(store_path.as_ref(), path.as_path());
   }
 
   #[test]
@@ -218,7 +246,7 @@ mod tests {
     let path =
       PathBuf::from("/invalid/prefix/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path = StorePath::try_from(path);
-    assert!(store_path.is_err())
+    assert!(store_path.is_err());
   }
 
   #[test]
@@ -226,42 +254,33 @@ mod tests {
     let path =
       PathBuf::from("/tmp/test123/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-    let (name, version) = store_path
-      .parse_name_and_version()
-      .expect("Failed to parse name and version");
-    assert_eq!(name, "foo");
-    assert_eq!(version, Some(Version::new("1.0")));
+      StorePath::try_from(path).expect("Failed to create StorePath");
+    assert_eq!(store_path.package_name(), "foo");
+    assert_eq!(store_path.package_version(), Some(&Version::new("1.0")));
   }
   #[test]
   fn test_name_and_version_parsing_store_path() {
     let path =
       PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-    let (name, version) = store_path
-      .parse_name_and_version()
-      .expect("Failed to parse name and version");
-    assert_eq!(name, "foo");
-    assert_eq!(version, Some(Version::new("1.0")));
+      StorePath::try_from(path).expect("Failed to create StorePath");
+    assert_eq!(store_path.package_name(), "foo");
+    assert_eq!(store_path.package_version(), Some(&Version::new("1.0")));
   }
+
   #[test]
   fn test_name_and_version_parsing_invalid_prefix() {
     let path =
       PathBuf::from("/nix/store/-0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-    let parsed = store_path.parse_name_and_version();
-    assert!(parsed.is_err())
+    assert!(StorePath::try_from(path).is_err());
   }
 
   #[test]
   fn test_name_and_version_parsing_no_version() {
     let path = PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo");
     let store_path = StorePath::try_from(path).unwrap();
-    let (name, version) = store_path.parse_name_and_version().unwrap();
-    assert_eq!(name, "foo");
-    assert_eq!(version, None);
+    assert_eq!(store_path.package_name(), "foo");
+    assert_eq!(store_path.package_version(), None);
   }
 
   #[test]
@@ -277,7 +296,7 @@ mod tests {
     ];
     for p in paths {
       let store_path = StorePath::try_from(PathBuf::from(p)).unwrap();
-      let (_name, _version) = store_path.parse_name_and_version().unwrap();
+      assert!(!store_path.package_name().is_empty());
     }
   }
 
@@ -322,11 +341,10 @@ mod tests {
 
     let dir = get_temp_dir();
     let path = dir.join(OsString::from_vec(
-      "invalid-unicode"
-        .as_bytes()
-        .into_iter()
+      b"invalid-unicode"
+        .iter()
         .chain(&[0xFFu8, 0xFE])
-        .map(|b| *b)
+        .copied()
         .collect(),
     ));
     std::fs::write(&path, "").unwrap();

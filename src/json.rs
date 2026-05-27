@@ -59,11 +59,11 @@ mod tests {
 
   use dix_diff::{
     Change,
+    CountedVersion,
     DerivationSelectionStatus,
     Diff,
     DiffReport,
     DiffStatus,
-    Version,
   };
   use size::Size;
 
@@ -77,12 +77,12 @@ mod tests {
       diffs:    vec![Diff {
         name:                "nixos".to_owned(),
         old:                 vec![
-          Version::new("25.11-system-path"),
-          Version::new("25.11-system"),
+          CountedVersion::single("25.11-system-path"),
+          CountedVersion::single("25.11-system"),
         ],
         new:                 vec![
-          Version::new("25.12-system-path"),
-          Version::new("25.12-system"),
+          CountedVersion::single("25.12-system-path"),
+          CountedVersion::single("25.12-system"),
         ],
         status:              DiffStatus::Changed(Change::Upgraded),
         selection:           DerivationSelectionStatus::Unselected,
