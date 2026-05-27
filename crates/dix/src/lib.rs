@@ -18,22 +18,17 @@ use eyre::{
 
 #[cfg(feature = "json")] pub mod json;
 
-pub mod diff;
-pub use diff::{
-  generate_diffs_from_paths,
-  match_version_lists,
-};
-
+mod render;
+pub use render::write_diff_report;
 pub mod report;
 pub use report::{
+  DerivationSelectionStatus,
   DiffReport,
-  write_diff_report,
+  PackageDiff,
+  query_diff_report,
 };
 
 pub mod store;
-
-pub mod version;
-use version::Version;
 
 /// A validated store path. Always starts with `/nix/store`.
 ///
@@ -65,13 +60,13 @@ impl StorePath {
   /// This function first drops the inputs first 44 chars, since that is exactly
   /// the length of the `/nix/store/0004yybkm5hnwjyxv129js3mjp7kbrax-` prefix.
   /// Then it matches that against our store path regex.
-  fn parse_name_and_version(&self) -> Result<(&str, Option<Version>)> {
+  fn parse_name_and_version(&self) -> Result<(&str, Option<&str>)> {
     static STORE_PATH_REGEX: sync::LazyLock<regex::Regex> = sync::LazyLock::new(
       || {
         regex::Regex::new(
-          r"(?<prefix>((/nix/store/)|(/tmp/.+?/))[a-zA-Z0-9]{32}-)(?<name>.+?)(-(?<version>[0-9].*?))?$",
-        )
-        .expect("failed to compile regex for Nix store paths")
+	          r"(?<prefix>((/nix/store/)|(/tmp/.+?/))[a-zA-Z0-9]{32}-)(?<name>.+?)(-(?<version>[0-9].*?))?$",
+	        )
+	        .unwrap_or_else(|err| panic!("failed to compile regex for Nix store paths: {err}"))
       },
     );
 
@@ -91,9 +86,9 @@ impl StorePath {
       bail!("failed to extract name from path '{path}'");
     }
 
-    let version: Option<Version> = captures.name("version").map(|capture| {
-      Version::from(capture.as_str().trim_start_matches('-').to_owned())
-    });
+    let version = captures
+      .name("version")
+      .map(|capture| capture.as_str().trim_start_matches('-'));
 
     tracing::trace!(name = name, version = ?version, "parsed name and version from path");
 
@@ -135,8 +130,10 @@ mod tests {
     #[test]
     fn parses_valid_paths(s in r"((/nix/store/)|(/tmp/.+?/))[a-z0-9A-Z]{32}-.+([0-9][-a-z0-9A-Z\.]*)?") {
       let path = PathBuf::from(s);
-      let store_path = StorePath::try_from(path.clone()).expect("Failed to create StorePath");
-      let (_name, _version) = store_path.parse_name_and_version().expect("Failed to get name and version");
+      let store_path = StorePath::try_from(path)
+        .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
+      let (_name, _version) = store_path.parse_name_and_version()
+        .unwrap_or_else(|err| panic!("failed to get name and version: {err}"));
     }
   }
 
@@ -146,20 +143,20 @@ mod tests {
   fn test_store_path_from_nix_store() {
     let path =
       PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
+    let store_path = StorePath::try_from(path.clone())
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let inner = store_path.0;
-    assert_eq!(inner, path)
+    assert_eq!(inner, path);
   }
 
   #[test]
   fn test_store_path_from_tmp_file() {
     let path =
       PathBuf::from("/tmp/test123/0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
+    let store_path = StorePath::try_from(path.clone())
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let inner = store_path.0;
-    assert_eq!(inner, path)
+    assert_eq!(inner, path);
   }
 
   #[test]
@@ -167,41 +164,41 @@ mod tests {
     let path =
       PathBuf::from("/invalid/prefix/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path = StorePath::try_from(path);
-    assert!(store_path.is_err())
+    assert!(store_path.is_err());
   }
 
   #[test]
   fn test_name_and_version_parsing_tmpfile() {
     let path =
       PathBuf::from("/tmp/test123/0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let (name, version) = store_path
       .parse_name_and_version()
-      .expect("Failed to parse name and version");
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
     assert_eq!(name, "foo");
-    assert_eq!(version, Some(Version::new("1.0")));
+    assert_eq!(version, Some("1.0"));
   }
   #[test]
   fn test_name_and_version_parsing_store_path() {
     let path =
       PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let (name, version) = store_path
       .parse_name_and_version()
-      .expect("Failed to parse name and version");
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
     assert_eq!(name, "foo");
-    assert_eq!(version, Some(Version::new("1.0")));
+    assert_eq!(version, Some("1.0"));
   }
   #[test]
   fn test_name_and_version_parsing_invalid_prefix() {
     let path =
       PathBuf::from("/nix/store/-0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path =
-      StorePath::try_from(path.clone()).expect("Failed to create StorePath");
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let parsed = store_path.parse_name_and_version();
-    assert!(parsed.is_err())
+    assert!(parsed.is_err());
   }
 
   #[test]
@@ -235,7 +232,9 @@ mod tests {
     static TEMP_DIR: OnceLock<TempDir> = OnceLock::new();
     TEMP_DIR
       .get_or_init(|| {
-        TempDir::new().expect("Failed to create temporary directory.")
+        TempDir::new().unwrap_or_else(|err| {
+          panic!("failed to create temporary directory: {err}")
+        })
       })
       .path()
   }
@@ -271,11 +270,10 @@ mod tests {
 
     let dir = get_temp_dir();
     let path = dir.join(OsString::from_vec(
-      "invalid-unicode"
-        .as_bytes()
-        .into_iter()
+      b"invalid-unicode"
+        .iter()
         .chain(&[0xFFu8, 0xFE])
-        .map(|b| *b)
+        .copied()
         .collect(),
     ));
     std::fs::write(&path, "").unwrap();

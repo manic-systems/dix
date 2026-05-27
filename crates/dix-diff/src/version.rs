@@ -7,24 +7,21 @@ use derive_more::{
   Deref,
   Display,
 };
-#[cfg(feature = "json")] use serde::Serialize;
 
 /// Separators used to split version strings.
 const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
 
 /// A version string with semantic comparison support.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "json", derive(Serialize))]
 pub struct Version {
-  pub name:   String,
-  pub amount: usize,
+  pub name: String,
 }
 
 impl Version {
+  #[must_use]
   pub fn new(version: impl Into<String>) -> Self {
     Self {
-      name:   version.into(),
-      amount: 1,
+      name: version.into(),
     }
   }
 
@@ -215,11 +212,7 @@ impl Ord for VersionComponent<'_> {
 
 impl fmt::Display for Version {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    if self.amount > 1 {
-      write!(f, "{} ×{}", self.name, self.amount)
-    } else {
-      f.write_str(&self.name)
-    }
+    f.write_str(&self.name)
   }
 }
 
@@ -274,9 +267,10 @@ mod tests {
       a in ".*",
     ) {
       let a = Version::new(a);
+      let b = a.clone();
 
       assert_eq!(a.cmp(&a), std::cmp::Ordering::Equal);
-      assert_eq!(a, a)
+      assert_eq!(a, b);
     }
 
     fn test_version_antisymmetry(
@@ -286,8 +280,10 @@ mod tests {
       let a = Version::new(a);
       let b = Version::new(b);
 
-      // a < b && b < a -> a == b
-      assert!(!(a < b && b > a) || (a.cmp(&b) == std::cmp::Ordering::Equal && a == b));
+      assert_eq!(a.cmp(&b), b.cmp(&a).reverse());
+      if a.cmp(&b) == std::cmp::Ordering::Equal {
+        assert_eq!(a, b);
+      }
     }
 
   }
@@ -429,10 +425,6 @@ mod tests {
   fn version_display() {
     let v1 = Version::new("1.2.3");
     assert_eq!(format!("{v1}"), "1.2.3");
-
-    let mut v2 = Version::new("1.2.3");
-    v2.amount = 5;
-    assert_eq!(format!("{v2}"), "1.2.3 ×5");
   }
 
   #[test]
@@ -494,7 +486,6 @@ mod tests {
     let v2 = v1.clone();
     assert_eq!(v1, v2);
     assert_eq!(v1.name, v2.name);
-    assert_eq!(v1.amount, v2.amount);
   }
 
   #[test]
