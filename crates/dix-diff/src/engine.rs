@@ -98,10 +98,21 @@ fn collect_package_versions<'a>(
 
 fn count_versions(versions: Vec<Version>) -> HashMap<Version, usize> {
   let mut counts = HashMap::new();
-  for version in versions {
-    *counts.entry(version).or_insert(0) += 1;
+  for mut version in versions {
+    let amount = version.amount;
+    if amount == 0 {
+      continue;
+    }
+    version.amount = 1;
+    *counts.entry(version).or_insert(0) += amount;
   }
   counts
+}
+
+fn version_with_amount(version: &Version, amount: usize) -> Version {
+  let mut version = version.clone();
+  version.amount = amount;
+  version
 }
 
 fn generate_diffs_from_version_map<S: BuildHasher>(
@@ -114,21 +125,36 @@ fn generate_diffs_from_version_map<S: BuildHasher>(
     let old_counts = count_versions(old_versions);
     let new_counts = count_versions(new_versions);
 
-    let old_set: HashSet<Version> = old_counts.keys().cloned().collect();
-    let new_set: HashSet<Version> = new_counts.keys().cloned().collect();
+    let mut unique_old = Vec::new();
+    let mut unique_new = Vec::new();
+    let mut has_common_versions = false;
 
-    let common_count = old_set.intersection(&new_set).count();
+    for (old_version, old_count) in &old_counts {
+      let old_count = *old_count;
+      let new_count = new_counts.get(old_version).copied().unwrap_or(0);
+      let removed_count = old_count.saturating_sub(new_count);
 
-    let unique_old: Vec<Version> =
-      old_set.difference(&new_set).cloned().collect();
-    let unique_new: Vec<Version> =
-      new_set.difference(&old_set).cloned().collect();
+      has_common_versions |= old_count.min(new_count) > 0;
+      if removed_count > 0 {
+        unique_old.push(version_with_amount(old_version, removed_count));
+      }
+    }
+
+    for (new_version, new_count) in &new_counts {
+      let new_count = *new_count;
+      let old_count = old_counts.get(new_version).copied().unwrap_or(0);
+      let added_count = new_count.saturating_sub(old_count);
+
+      if added_count > 0 {
+        unique_new.push(version_with_amount(new_version, added_count));
+      }
+    }
 
     let status = if unique_old.is_empty() && unique_new.is_empty() {
       continue;
-    } else if common_count == 0 && unique_old.is_empty() {
+    } else if !has_common_versions && unique_old.is_empty() {
       DiffStatus::Added
-    } else if common_count == 0 && unique_new.is_empty() {
+    } else if !has_common_versions && unique_new.is_empty() {
       DiffStatus::Removed
     } else if unique_old.is_empty() || unique_new.is_empty() {
       DiffStatus::Changed(Change::UpgradeDowngrade)
@@ -143,7 +169,7 @@ fn generate_diffs_from_version_map<S: BuildHasher>(
       new: unique_new,
       status,
       selection: DerivationSelectionStatus::Unselected,
-      has_common_versions: common_count > 0,
+      has_common_versions,
     });
   }
 
@@ -221,6 +247,12 @@ mod tests {
       generate_diffs_from_version_map(version_map(name, old, new));
     canonicalize_diffs(&mut diffs);
     diffs.pop().expect("expected exactly one diff")
+  }
+
+  fn version_with_test_amount(version: &str, amount: usize) -> Version {
+    let mut version = Version::new(version);
+    version.amount = amount;
+    version
   }
 
   #[test]
@@ -312,6 +344,38 @@ mod tests {
 
     assert!(diff.has_common_versions);
     assert_eq!(diff.status, DiffStatus::Changed(Change::Upgraded));
+  }
+
+  #[test]
+  fn generate_diffs_preserves_removed_duplicate_versions() {
+    let diff = diff_for("pkg", &["1.0.0", "1.0.0", "1.0.0"], &["1.0.0"]);
+
+    assert!(diff.has_common_versions);
+    assert_eq!(diff.status, DiffStatus::Changed(Change::UpgradeDowngrade));
+    assert_eq!(diff.old, vec![version_with_test_amount("1.0.0", 2)]);
+    assert!(diff.new.is_empty());
+  }
+
+  #[test]
+  fn generate_diffs_preserves_added_duplicate_versions() {
+    let diff = diff_for("pkg", &["1.0.0"], &["1.0.0", "1.0.0", "1.0.0"]);
+
+    assert!(diff.has_common_versions);
+    assert_eq!(diff.status, DiffStatus::Changed(Change::UpgradeDowngrade));
+    assert!(diff.old.is_empty());
+    assert_eq!(diff.new, vec![version_with_test_amount("1.0.0", 2)]);
+  }
+
+  #[test]
+  fn generate_diffs_ignores_matching_duplicate_versions() {
+    assert!(
+      generate_diffs_from_version_map(version_map(
+        "package",
+        &["1.0.0", "1.0.0"],
+        &["1.0.0", "1.0.0"]
+      ))
+      .is_empty()
+    );
   }
 
   #[test]
