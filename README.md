@@ -70,6 +70,17 @@ Passing `--force-correctness` will make dix fall back to Nix commands if
 connection to the database fails, which ensures correct output, potentially at
 the cost of speed.
 
+## Releasing
+
+`dix-diff` is a separate crate because it owns the pure package/version diff
+engine. Publish it before publishing `dix`; the `dix` package depends on the
+same exact `dix-diff` version.
+
+```sh
+cargo publish -p dix-diff
+cargo publish -p dix
+```
+
 ## Contributing
 
 If you have any problems, feature requests or want to contribute code or want to

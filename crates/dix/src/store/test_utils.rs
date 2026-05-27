@@ -12,7 +12,7 @@ use eyre::Result;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-/// Test database builder for creating temporary SQLite databases
+/// Test database builder for creating temporary `SQLite` databases
 /// with the Nix store schema.
 pub struct TestDbBuilder {
   temp_dir: TempDir,
@@ -100,7 +100,7 @@ impl TestDbBuilder {
       .ok()?;
     drop(stmt);
 
-    conn.close().map_err(|(_, err)| err).ok();
+    let _ = conn.close().map_err(|(_, err)| err);
     Some(id)
   }
 

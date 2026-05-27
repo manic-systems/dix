@@ -7,7 +7,12 @@ use std::{
     Path,
     PathBuf,
   },
-  process::Command,
+  process::{
+    Command,
+    Output,
+  },
+  thread,
+  time::Duration,
 };
 
 use eyre::{
@@ -59,7 +64,8 @@ impl Default for CommandBackend {
 }
 
 impl CommandBackend {
-  pub fn new(cmd_nix_store: String, cmd_nix: String) -> Self {
+  #[must_use]
+  pub const fn new(cmd_nix_store: String, cmd_nix: String) -> Self {
     Self {
       nix_store_cmd: cmd_nix_store,
       nix_cmd:       cmd_nix,
@@ -70,7 +76,7 @@ impl CommandBackend {
 fn nix_command_query(cmd_store: &str, args: &[&str]) -> Result<Vec<StorePath>> {
   let command_str = format!("{cmd_store} {}", args.join(" "));
   tracing::debug!(command = %command_str, "executing nix command");
-  let references = Command::new(cmd_store).args(args).output();
+  let references = command_output(cmd_store, args);
 
   let query = references?;
   tracing::trace!(command = %command_str, "nix command executed successfully");
@@ -93,6 +99,26 @@ fn nix_command_query(cmd_store: &str, args: &[&str]) -> Result<Vec<StorePath>> {
   }
 
   Ok(paths)
+}
+
+fn command_output(cmd_store: &str, args: &[&str]) -> std::io::Result<Output> {
+  const TEXT_FILE_BUSY: i32 = 26;
+
+  for attempt in 0..3 {
+    match Command::new(cmd_store).args(args).output() {
+      Err(error) if error.raw_os_error() == Some(TEXT_FILE_BUSY) => {
+        tracing::debug!(
+          attempt = attempt + 1,
+          command = cmd_store,
+          "command executable is temporarily busy"
+        );
+        thread::sleep(Duration::from_millis(10));
+      },
+      result => return result,
+    }
+  }
+
+  Command::new(cmd_store).args(args).output()
 }
 
 impl StoreBackend for CommandBackend {
@@ -158,14 +184,16 @@ impl StoreBackend for CommandBackend {
 
 #[cfg(test)]
 mod tests {
-  use std::os::unix::fs::PermissionsExt;
+  use std::{
+    io::Write as _,
+    os::unix::fs::PermissionsExt,
+  };
 
-  use itertools::Itertools;
   use tempfile::TempDir;
 
   use super::*;
 
-  const FAKE_PATHS: &'static str = r#"/nix/store/0j3jwpcy0r9fk8ymmknq7d5bkjwg6kr3-gcc-15.2.0-lib
+  const FAKE_PATHS: &str = r"/nix/store/0j3jwpcy0r9fk8ymmknq7d5bkjwg6kr3-gcc-15.2.0-lib
 /nix/store/0j7cqjjjrx3dm875bpkwq8sqhc4c480f-sparklines-1.7-tex
 /nix/store/0j7wz5lhxzzjnq637xyjv9arq6irplks-libdrm-2.4.129-bin
 /nix/store/0j8ydh92l9hdjibg5d24nasxzha9ibvr-mbedtls-3.6.5
@@ -213,15 +241,15 @@ mod tests {
 /nix/store/0m4i30rjfqhi2zlgfyra9v39fvmwywha-epigraph-keys-1.0-tex
 /nix/store/0m5jvmyqqj8mxvczdj2rqcyq0fclkx7g-texlive-bin-big-2025-luahbtex
 /nix/store/0m7l4qv84417cy2m8jlw7yxyn12ralyq-twolame-2017-09-27
-/nix/store/0m8p1yj6k5fk7fpvj37krhbsnry8v70r-pmx-3.00-tex"#;
+/nix/store/0m8p1yj6k5fk7fpvj37krhbsnry8v70r-pmx-3.00-tex";
 
-  const FAKE_CLOSURE_SIZE: i64 = 123456789;
+  const FAKE_CLOSURE_SIZE: i64 = 123_456_789;
 
   const FAKE_STORE_PATH: &str =
     "/nix/store/h9lc1dpi14z7is86ffhl3ld569138595-audit-tmpdir.sh";
 
   /// create a fake nix command that always
-  /// outputs the same store paths given by FAKE_PATHS
+  /// outputs the same store paths given by `FAKE_PATHS`
   fn setup_fake_nix_command_mock_data() -> (TempDir, String) {
     let mock_command_content = format!(
       r#"#!/usr/bin/env sh
@@ -236,36 +264,46 @@ mod tests {
       closure_size = FAKE_CLOSURE_SIZE,
       echos = FAKE_PATHS
         .lines()
-        .map(|path| format!("echo \"{}\"", path))
+        .map(|path| format!("echo \"{path}\""))
         .collect::<Vec<String>>()
         .join("\n")
     );
-    setup_fake_nix_command(mock_command_content)
+    setup_fake_nix_command(&mock_command_content)
   }
 
   /// create a fake nix command that errors
   fn setup_fake_nix_command_error() -> (TempDir, String) {
-    let mock_command_content = format!(
+    setup_fake_nix_command(
       r#"#!/usr/bin/env sh
       echo "I am not working correctly..."
       exit 1
     "#,
-    );
-    setup_fake_nix_command(mock_command_content)
+    )
   }
 
   /// The tempdir is returned as the actual directory
   /// is deleted once the value is dropped.
-  fn setup_fake_nix_command(content: String) -> (TempDir, String) {
-    let cmd_dir = TempDir::new().expect("unable to create temp dir");
+  fn setup_fake_nix_command(content: &str) -> (TempDir, String) {
+    let cmd_dir = TempDir::new()
+      .unwrap_or_else(|err| panic!("unable to create temp dir: {err}"));
     let mock_command = cmd_dir.path().join("mock-nix-store");
-    std::fs::write(&mock_command, content)
-      .expect("unable to write mock command file");
+    {
+      let mut file =
+        std::fs::File::create(&mock_command).unwrap_or_else(|err| {
+          panic!("unable to create mock command file: {err}")
+        });
+      file.write_all(content.as_bytes()).unwrap_or_else(|err| {
+        panic!("unable to write mock command file: {err}")
+      });
+      file.sync_all().unwrap_or_else(|err| {
+        panic!("unable to sync mock command file: {err}")
+      });
+    }
     std::fs::set_permissions(
       &mock_command,
       std::fs::Permissions::from_mode(0o500),
     )
-    .expect("unable to set permissions");
+    .unwrap_or_else(|err| panic!("unable to set permissions: {err}"));
     (cmd_dir, mock_command.to_string_lossy().to_string())
   }
 
@@ -293,7 +331,7 @@ mod tests {
     let mut expected = FAKE_PATHS
       .lines()
       .map(|path| StorePath::try_from(PathBuf::from(path)).unwrap())
-      .collect_vec();
+      .collect::<Vec<_>>();
     expected.sort();
 
     assert_eq!(references, expected);
@@ -309,7 +347,7 @@ mod tests {
     let mut expected = FAKE_PATHS
       .lines()
       .map(|path| StorePath::try_from(PathBuf::from(path)).unwrap())
-      .collect_vec();
+      .collect::<Vec<_>>();
     expected.sort();
 
     assert_eq!(references, expected);
@@ -325,13 +363,13 @@ mod tests {
 
   #[test]
   fn test_nonexistent_nix_command() {
-    let backend = CommandBackend::new("".to_owned(), "".to_owned());
+    let backend = CommandBackend::new(String::new(), String::new());
     let result = backend.query_system_derivations(Path::new(FAKE_STORE_PATH));
     assert!(result.is_err());
   }
   #[test]
   fn test_nonexistent_nix_store_command() {
-    let backend = CommandBackend::new("".to_owned(), "".to_owned());
+    let backend = CommandBackend::new(String::new(), String::new());
     let result = backend.query_closure_size(Path::new(FAKE_STORE_PATH));
     assert!(result.is_err());
   }

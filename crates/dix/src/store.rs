@@ -39,11 +39,37 @@ pub const DATABASE_PATH_IMMUTABLE: &str =
 /// This allows us to construct a backend that can fall back
 /// to e.g. shell commands should something go wrong.
 pub trait StoreBackend: Display {
+  /// Opens any resources required by the backend.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the backend cannot be connected.
   fn connect(&mut self) -> Result<()>;
+  /// Returns whether this backend is currently connected.
   fn connected(&self) -> bool;
+  /// Closes resources held by the backend.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if resources cannot be closed cleanly.
   fn close(&mut self) -> Result<()>;
+  /// Queries the closure size for a Nix store path.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the backend query fails or the size cannot be read.
   fn query_closure_size(&self, path: &Path) -> Result<Size>;
+  /// Queries derivations selected by a system profile.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the backend query fails.
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>>;
+  /// Queries all dependencies of a store path.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the backend query fails.
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>>;
 }
 
@@ -57,10 +83,12 @@ pub struct CombinedStoreBackend {
 }
 
 impl CombinedStoreBackend {
+  #[must_use]
   pub fn new(backends: Vec<Box<dyn StoreBackend>>) -> Self {
     Self { backends }
   }
 
+  #[must_use]
   pub fn for_correctness(force_correctness: bool) -> Self {
     if force_correctness {
       Self::default_correct()
@@ -92,8 +120,9 @@ impl CombinedStoreBackend {
   ///
   /// This first tries the regular sqlite database, then falls back to opening
   /// it with `immutable=1`, and finally falls back to Nix commands.
+  #[must_use]
   pub fn default_fast() -> Self {
-    CombinedStoreBackend::new(vec![
+    Self::new(vec![
       Box::new(DbConnection::new(DATABASE_PATH)),
       Box::new(DbConnection::new(DATABASE_PATH_IMMUTABLE)),
       Box::new(CommandBackend::default()),
@@ -106,8 +135,9 @@ impl CombinedStoreBackend {
   /// Note that [`DATABASE_PATH_IMMUTABLE`] is not used here, since opening
   /// the database can lead to undefined results (also silently with no errors)
   /// if the database is actually modified while opened.
+  #[must_use]
   pub fn default_correct() -> Self {
-    CombinedStoreBackend::new(vec![
+    Self::new(vec![
       Box::new(DbConnection::new(DATABASE_PATH)),
       Box::new(CommandBackend::default()),
     ])
