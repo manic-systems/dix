@@ -10,29 +10,29 @@ keywords    = [ "nix", "nixos" ]
 
 [dependencies]
 clap                = { features = [ "derive" ], version = "4.5.37" }
-eyre                = "0.6"
 clap-verbosity-flag = "3.0.2"
 derive_more         = { features = [ "full" ], version = "2.0.1" }
 diff                = "0.1.13"
+eyre                = "0.6"
 itertools           = "0.14.0"
-tracing             = "0.1"
-tracing-subscriber  = { version = "0.3", features = [ "env-filter" ] }
 pathfinding         = "4.14.0"
 regex               = "1.11.1"
-rusqlite            = { features = [ "bundled" ], version = "0.39.0" }
+rusqlite            = { features = [ "bundled" ], version = "0.40.0" }
+serde               = { features = [ "derive" ], optional = true, version = "1.0.228" }
+serde_json          = { optional = true, version = "1.0.149" }
 size                = "0.5.0"
+tracing             = "0.1"
+tracing-subscriber  = { features = [ "env-filter" ], version = "0.3" }
 unicode-width       = "0.2.0"
 yansi               = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
-serde               = { features = ["derive"], version = "1.0.228", optional = true }
-serde_json          = { version = "1.0.149", optional = true }
-
-[features]
-default = ["json"]
-json = ["dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
-proptest  = "1.6.0"
-tempfile  = "3.10.0"
+proptest = "1.6.0"
+tempfile = "3.10.0"
+
+[features]
+default = [ "json" ]
+json    = [ "dep:serde", "dep:serde_json" ]
 
 # See:
 #  <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>
