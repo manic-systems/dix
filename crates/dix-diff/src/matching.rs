@@ -51,6 +51,94 @@ pub(crate) fn levenshtein<T: Eq>(from: &[T], to: &[T]) -> usize {
   prev[to_len]
 }
 
+fn version_edit_distance(from: &Version, to: &Version) -> usize {
+  let from_components: Vec<_> = from
+    .into_iter()
+    .filter_map(VersionPiece::component)
+    .collect();
+  let to_components: Vec<_> =
+    to.into_iter().filter_map(VersionPiece::component).collect();
+
+  levenshtein(&from_components, &to_components)
+}
+
+fn closest_version_index(source: &Version, candidates: &[Version]) -> usize {
+  let mut best_index = 0;
+  let mut best_distance = version_edit_distance(source, &candidates[0]);
+
+  for (index, candidate) in candidates.iter().enumerate().skip(1) {
+    let distance = version_edit_distance(source, candidate);
+    if distance < best_distance {
+      best_index = index;
+      best_distance = distance;
+    }
+  }
+
+  best_index
+}
+
+fn match_single_left<'a>(
+  source: &'a Version,
+  candidates: &'a [Version],
+) -> Vec<EitherOrBoth<&'a Version>> {
+  let best_index = closest_version_index(source, candidates);
+  let mut pairings = Vec::with_capacity(candidates.len());
+
+  pairings.push(EitherOrBoth::Both(source, &candidates[best_index]));
+
+  let mut remaining = candidates
+    .iter()
+    .enumerate()
+    .filter_map(|(index, version)| (index != best_index).then_some(version))
+    .collect::<Vec<_>>();
+  remaining.sort_unstable();
+  pairings.extend(remaining.into_iter().map(EitherOrBoth::Right));
+
+  pairings
+}
+
+fn match_single_right<'a>(
+  candidates: &'a [Version],
+  source: &'a Version,
+) -> Vec<EitherOrBoth<&'a Version>> {
+  let best_index = closest_version_index(source, candidates);
+  let mut pairings = Vec::with_capacity(candidates.len());
+
+  pairings.push(EitherOrBoth::Both(&candidates[best_index], source));
+
+  let mut remaining = candidates
+    .iter()
+    .enumerate()
+    .filter_map(|(index, version)| (index != best_index).then_some(version))
+    .collect::<Vec<_>>();
+  remaining.sort_unstable();
+  pairings.extend(remaining.into_iter().map(EitherOrBoth::Left));
+
+  pairings
+}
+
+fn match_two_by_two<'a>(
+  from: &'a [Version],
+  to: &'a [Version],
+) -> Vec<EitherOrBoth<&'a Version>> {
+  let direct_cost = version_edit_distance(&from[0], &to[0])
+    .saturating_add(version_edit_distance(&from[1], &to[1]));
+  let crossed_cost = version_edit_distance(&from[0], &to[1])
+    .saturating_add(version_edit_distance(&from[1], &to[0]));
+
+  if direct_cost <= crossed_cost {
+    vec![
+      EitherOrBoth::Both(&from[0], &to[0]),
+      EitherOrBoth::Both(&from[1], &to[1]),
+    ]
+  } else {
+    vec![
+      EitherOrBoth::Both(&from[0], &to[1]),
+      EitherOrBoth::Both(&from[1], &to[0]),
+    ]
+  }
+}
+
 /// Takes two lists of versions and tries to match them using the Hungarian
 /// algorithm. The matching attempts to minimize the edit distance between
 /// version pairs, which means:
@@ -71,9 +159,25 @@ pub(crate) fn match_version_lists<'a>(
     return from.iter().map(EitherOrBoth::Left).collect();
   }
 
-  // Quick path for common case - exact match
-  if from.len() == 1 && to.len() == 1 && from[0] == to[0] {
+  // Quick paths for common small cases that do not need the assignment solver.
+  if from.len() == 1 && to.len() == 1 {
     return vec![EitherOrBoth::Both(&from[0], &to[0])];
+  }
+  if from == to {
+    return from
+      .iter()
+      .zip(to)
+      .map(|(from, to)| EitherOrBoth::Both(from, to))
+      .collect();
+  }
+  if from.len() == 1 {
+    return match_single_left(&from[0], to);
+  }
+  if to.len() == 1 {
+    return match_single_right(from, &to[0]);
+  }
+  if from.len() == 2 && to.len() == 2 {
+    return match_two_by_two(from, to);
   }
 
   // Hungarian algorithm requires #rows <= #columns
@@ -319,6 +423,62 @@ mod tests {
     assert_eq!(matched.len(), 2);
     assert!(matched.iter().all(EitherOrBoth::has_left));
     assert!(matched.iter().all(EitherOrBoth::has_right));
+  }
+
+  #[test]
+  fn match_version_lists_pairs_single_versions() {
+    let left = [Version::new("1.0.0")];
+    let right = [Version::new("2.0.0")];
+
+    let result = match_version_lists(&left, &right);
+
+    assert_eq!(result.len(), 1);
+    assert!(matches!(result[0], EitherOrBoth::Both(_, _)));
+  }
+
+  #[test]
+  fn match_version_lists_pairs_single_with_closest_candidate() {
+    let left = [Version::new("1.0.0")];
+    let right = [
+      Version::new("3.5.7"),
+      Version::new("1.0.1"),
+      Version::new("8.8.8"),
+    ];
+
+    let result = match_version_lists(&left, &right);
+
+    assert_eq!(result.len(), 3);
+    assert!(matches!(
+      result[0],
+      EitherOrBoth::Both(_, right) if right.name == "1.0.1"
+    ));
+    assert_eq!(
+      result
+        .iter()
+        .filter(|result| matches!(result, EitherOrBoth::Right(_)))
+        .count(),
+      2
+    );
+  }
+
+  #[test]
+  fn match_version_lists_uses_cheapest_two_by_two_pairing() {
+    let left = [Version::new("1.0.0"), Version::new("10.0.0")];
+    let right = [Version::new("10.0.1"), Version::new("1.0.1")];
+
+    let result = match_version_lists(&left, &right);
+
+    assert_eq!(result.len(), 2);
+    assert!(matches!(
+      result[0],
+      EitherOrBoth::Both(left, right)
+        if left.name == "1.0.0" && right.name == "1.0.1"
+    ));
+    assert!(matches!(
+      result[1],
+      EitherOrBoth::Both(left, right)
+        if left.name == "10.0.0" && right.name == "10.0.1"
+    ));
   }
 
   #[test]
