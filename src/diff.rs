@@ -953,15 +953,24 @@ pub fn generate_diffs_from_paths<S: BuildHasher>(
     let old_counts = count_versions(old_versions);
     let new_counts = count_versions(new_versions);
 
-    let old_set: HashSet<Version> = old_counts.keys().cloned().collect();
-    let new_set: HashSet<Version> = new_counts.keys().cloned().collect();
-
-    let common_count = old_set.intersection(&new_set).count();
-
-    let unique_old: Vec<Version> =
-      old_set.difference(&new_set).cloned().collect();
-    let unique_new: Vec<Version> =
-      new_set.difference(&old_set).cloned().collect();
+    let mut common_count = 0usize;
+    let mut unique_old: Vec<Version> = Vec::new();
+    let mut unique_new: Vec<Version> = Vec::new();
+    let mut all_versions: HashSet<&Version> = HashSet::new();
+    all_versions.extend(old_counts.keys());
+    all_versions.extend(new_counts.keys());
+    #[expect(clippy::iter_over_hash_type)]
+    for version in &all_versions {
+      let old = old_counts.get(*version).copied().unwrap_or(0);
+      let new = new_counts.get(*version).copied().unwrap_or(0);
+      common_count += old.min(new);
+      for _ in 0..old.saturating_sub(new) {
+        unique_old.push((*version).clone());
+      }
+      for _ in 0..new.saturating_sub(old) {
+        unique_new.push((*version).clone());
+      }
+    }
 
     let status = if unique_old.is_empty() && unique_new.is_empty() {
       continue;
@@ -1517,8 +1526,12 @@ mod tests {
     );
     let result = generate_diffs_from_paths(paths);
     assert_eq!(result.len(), 1);
-    // Should detect the upgrade from 1.0.0 to 2.0.0
-    assert_eq!(result[0].status, DiffStatus::Changed(Change::Upgraded));
+    // Three 1.0.0s gone, one 2.0.0 added: one slot pairs as an upgrade,
+    // the two unmatched 1.0.0 removals register as downgrades.
+    assert_eq!(
+      result[0].status,
+      DiffStatus::Changed(Change::UpgradeDowngrade),
+    );
   }
 
   #[test]
@@ -1684,5 +1697,53 @@ mod tests {
     // 1.0.0 removed, 1.2.0 and 3.0.0 added
     assert_eq!(result[0].old.len(), 1);
     assert_eq!(result[0].new.len(), 2);
+  }
+
+  #[test]
+  fn generate_diffs_duplicate_added() {
+    // Old: one v1.0.0. New: two v1.0.0 (e.g. overlay variant alongside
+    // upstream). The added copy is a real change and must surface.
+    let mut paths = HashMap::new();
+    paths.insert(
+      "pkg".to_owned(),
+      (vec![Version::new("1.0.0")], vec![
+        Version::new("1.0.0"),
+        Version::new("1.0.0"),
+      ]),
+    );
+    let result = generate_diffs_from_paths(paths);
+    assert_eq!(result.len(), 1);
+  }
+
+  #[test]
+  fn generate_diffs_duplicate_removed() {
+    // Old: two v1.0.0. New: one v1.0.0. The dropped copy must surface.
+    let mut paths = HashMap::new();
+    paths.insert(
+      "pkg".to_owned(),
+      (vec![Version::new("1.0.0"), Version::new("1.0.0")], vec![
+        Version::new("1.0.0"),
+      ]),
+    );
+    let result = generate_diffs_from_paths(paths);
+    assert_eq!(result.len(), 1);
+  }
+
+  #[test]
+  fn generate_diffs_duplicate_alongside_existing_versions() {
+    // Closure had {v1, v2}, now has {v1, v2, v2} because a locally
+    // pinned derivation shadows upstream v2. The new duplicate must
+    // surface even though both sides have the same version *set*.
+    let mut paths = HashMap::new();
+    paths.insert(
+      "pkg".to_owned(),
+      (vec![Version::new("1.0.0"), Version::new("2.0.0")], vec![
+        Version::new("1.0.0"),
+        Version::new("2.0.0"),
+        Version::new("2.0.0"),
+      ]),
+    );
+    let result = generate_diffs_from_paths(paths);
+    assert_eq!(result.len(), 1);
   }
 }
