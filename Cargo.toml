@@ -19,7 +19,6 @@ clap-verbosity-flag = "3.0.2"
 derive_more         = { features = [ "full" ], version = "2.0.1" }
 dix-diff            = { path = "crates/dix-diff" }
 eyre                = "0.6"
-regex               = "1.11.1"
 rusqlite            = { features = [ "bundled" ], version = "0.40.0" }
 serde               = { features = [ "derive" ], optional = true, version = "1.0.228" }
 serde_json          = { optional = true, version = "1.0.149" }

@@ -1,9 +1,6 @@
-use std::{
-  path::{
-    Path,
-    PathBuf,
-  },
-  sync,
+use std::path::{
+  Path,
+  PathBuf,
 };
 
 use derive_more::Deref;
@@ -55,20 +52,7 @@ impl TryFrom<PathBuf> for StorePath {
 impl StorePath {
   /// Parses a Nix store path to extract the packages name and possibly its
   /// version.
-  ///
-  /// This function first drops the inputs first 44 chars, since that is exactly
-  /// the length of the `/nix/store/0004yybkm5hnwjyxv129js3mjp7kbrax-` prefix.
-  /// Then it matches that against our store path regex.
   fn parse_name_and_version(&self) -> Result<(&str, Option<Version>)> {
-    static STORE_PATH_REGEX: sync::LazyLock<regex::Regex> = sync::LazyLock::new(
-      || {
-        regex::Regex::new(
-          r"(?<prefix>((/nix/store/)|(/tmp/.+?/))[a-zA-Z0-9]{32}-)(?<name>.+?)(-(?<version>[0-9].*?))?$",
-        )
-        .expect("failed to compile regex for Nix store paths")
-      },
-    );
-
     let path = self.to_str().with_context(|| {
       format!(
         "failed to convert path '{path}' to valid unicode",
@@ -76,23 +60,96 @@ impl StorePath {
       )
     })?;
 
-    let captures = STORE_PATH_REGEX.captures(path).ok_or_else(|| {
-      eyre!("path '{path}' does not match expected Nix store format")
-    })?;
-
-    let name = captures.name("name").map_or("", |capture| capture.as_str());
-    if name.is_empty() {
-      bail!("failed to extract name from path '{path}'");
-    }
-
-    let version: Option<Version> = captures.name("version").map(|capture| {
-      Version::from(capture.as_str().trim_start_matches('-').to_owned())
-    });
+    let store_name = store_name_from_path(path)?;
+    let (name, version) = split_name_and_version(store_name)?;
 
     tracing::trace!(name = name, version = ?version, "parsed name and version from path");
 
     Ok((name, version))
   }
+}
+
+fn store_name_from_path(path: &str) -> Result<&str> {
+  let store_name = if let Some(rest) = path.strip_prefix("/nix/store/") {
+    rest
+  } else if path.starts_with("/tmp/") {
+    tmp_store_name_from_path(path).ok_or_else(|| {
+      eyre!("path '{path}' does not include a valid temporary store-path name")
+    })?
+  } else {
+    return Err(eyre!(
+      "path '{path}' does not match expected Nix store format"
+    ));
+  };
+
+  validate_store_name(path, store_name)
+}
+
+fn tmp_store_name_from_path(path: &str) -> Option<&str> {
+  let mut search_start = "/tmp/".len();
+
+  while let Some(relative_slash) = path[search_start..].find('/') {
+    let hash_start = search_start + relative_slash + 1;
+    let candidate = &path[hash_start..];
+    if store_hash_prefix_len(candidate).is_some() {
+      return Some(candidate);
+    }
+    search_start = hash_start;
+  }
+
+  None
+}
+
+fn validate_store_name<'a>(path: &str, store_name: &'a str) -> Result<&'a str> {
+  let Some((hash, name)) = store_name.split_once('-') else {
+    return Err(eyre!(
+      "path '{path}' does not include a Nix store hash separator"
+    ));
+  };
+
+  if hash.len() != 32 || store_hash_prefix_len(store_name).is_none() {
+    return Err(eyre!(
+      "path '{path}' does not include a valid Nix store hash"
+    ));
+  }
+
+  Ok(name)
+}
+
+fn store_hash_prefix_len(store_name: &str) -> Option<usize> {
+  let bytes = store_name.as_bytes();
+  if bytes.len() < 33 || bytes[32] != b'-' {
+    return None;
+  }
+
+  bytes[..32]
+    .iter()
+    .all(u8::is_ascii_alphanumeric)
+    .then_some(32)
+}
+
+fn split_name_and_version(store_name: &str) -> Result<(&str, Option<Version>)> {
+  if store_name.is_empty() {
+    bail!("failed to extract name from store path");
+  }
+
+  let version_start = store_name
+    .as_bytes()
+    .windows(2)
+    .position(|window| window[0] == b'-' && window[1].is_ascii_digit());
+
+  let Some(version_start) = version_start else {
+    return Ok((store_name, None));
+  };
+
+  if version_start == 0 {
+    bail!("failed to extract name from store path");
+  }
+
+  Ok((
+    &store_name[..version_start],
+    Some(Version::from(store_name[version_start + 1..].to_owned())),
+  ))
 }
 
 fn path_to_canonical_string(path: &Path) -> Result<String> {
