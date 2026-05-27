@@ -7,15 +7,18 @@ homepage    = "https://github.com/faukah/dix"
 repository  = "https://github.com/faukah/dix"
 license     = "GPL-3.0-only"
 keywords    = [ "nix", "nixos" ]
+categories  = [ "command-line-utilities" ]
+
+[workspace]
+members  = [ "crates/dix-diff" ]
+resolver = "3"
 
 [dependencies]
 clap                = { features = [ "derive" ], version = "4.5.37" }
 clap-verbosity-flag = "3.0.2"
 derive_more         = { features = [ "full" ], version = "2.0.1" }
-diff                = "0.1.13"
+dix-diff            = { path = "crates/dix-diff" }
 eyre                = "0.6"
-itertools           = "0.14.0"
-pathfinding         = "4.14.0"
 regex               = "1.11.1"
 rusqlite            = { features = [ "bundled" ], version = "0.40.0" }
 serde               = { features = [ "derive" ], optional = true, version = "1.0.228" }
@@ -23,7 +26,6 @@ serde_json          = { optional = true, version = "1.0.149" }
 size                = "0.5.0"
 tracing             = "0.1"
 tracing-subscriber  = { features = [ "env-filter" ], version = "0.3" }
-unicode-width       = "0.2.0"
 yansi               = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
 
 [dev-dependencies]
@@ -32,7 +34,7 @@ tempfile = "3.10.0"
 
 [features]
 default = [ "json" ]
-json    = [ "dep:serde", "dep:serde_json" ]
+json    = [ "dep:serde", "dep:serde_json", "dix-diff/json" ]
 
 # See:
 #  <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>

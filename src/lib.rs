@@ -7,6 +7,7 @@ use std::{
 };
 
 use derive_more::Deref;
+use dix_diff::Version;
 use eyre::{
   Context as _,
   ContextCompat as _,
@@ -18,22 +19,15 @@ use eyre::{
 
 #[cfg(feature = "json")] pub mod json;
 
-pub mod diff;
-pub use diff::{
-  generate_diffs_from_paths,
-  match_version_lists,
-};
-
-pub mod report;
-pub use report::{
+pub use dix_diff::{
   DiffReport,
   write_diff_report,
 };
 
-pub mod store;
+pub mod report;
+pub use report::query_diff_report;
 
-pub mod version;
-use version::Version;
+pub mod store;
 
 /// A validated store path. Always starts with `/nix/store`.
 ///

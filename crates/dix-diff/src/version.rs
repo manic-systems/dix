@@ -274,9 +274,10 @@ mod tests {
       a in ".*",
     ) {
       let a = Version::new(a);
+      let b = a.clone();
 
       assert_eq!(a.cmp(&a), std::cmp::Ordering::Equal);
-      assert_eq!(a, a)
+      assert_eq!(a, b);
     }
 
     fn test_version_antisymmetry(
@@ -286,8 +287,10 @@ mod tests {
       let a = Version::new(a);
       let b = Version::new(b);
 
-      // a < b && b < a -> a == b
-      assert!(!(a < b && b > a) || (a.cmp(&b) == std::cmp::Ordering::Equal && a == b));
+      assert_eq!(a.cmp(&b), b.cmp(&a).reverse());
+      if a.cmp(&b) == std::cmp::Ordering::Equal {
+        assert_eq!(a, b);
+      }
     }
 
   }

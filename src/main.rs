@@ -192,7 +192,7 @@ fn display_diff(
       .display(),
   )?;
 
-  let report = dix::DiffReport::query(old_path, new_path, force_correctness)?;
+  let report = dix::query_diff_report(old_path, new_path, force_correctness)?;
   dix::write_diff_report(&mut out, &report)?;
 
   tracing::info!("diff computation complete");

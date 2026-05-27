@@ -3,23 +3,29 @@ use std::{
   path::Path,
 };
 
+use dix_diff::{
+  Diff,
+  DiffReport,
+};
 use eyre::{
   Result,
   WrapErr as _,
 };
 use serde::Serialize;
 
-use crate::{
-  diff::Diff,
-  report::DiffReport,
-};
+use crate::query_diff_report;
 
+/// Writes the diff report as JSON.
+///
+/// # Errors
+///
+/// Returns an error if querying the diff report or writing JSON fails.
 pub fn display_diff(
   path_old: &Path,
   path_new: &Path,
   force_correctness: bool,
 ) -> Result<()> {
-  let report = DiffReport::query(path_old, path_new, force_correctness)?;
+  let report = query_diff_report(path_old, path_new, force_correctness)?;
   generate_diff(&mut std::io::stdout(), &report)
 }
 
@@ -51,17 +57,17 @@ impl<'a> From<&'a DiffReport> for JsonReport<'a> {
 #[cfg(test)]
 mod tests {
 
+  use dix_diff::{
+    Change,
+    DerivationSelectionStatus,
+    Diff,
+    DiffReport,
+    DiffStatus,
+    Version,
+  };
   use size::Size;
 
   use super::*;
-  use crate::{
-    Version,
-    diff::{
-      Change,
-      DerivationSelectionStatus,
-      DiffStatus,
-    },
-  };
 
   #[test]
   fn test_basic_json_output_format() {
