@@ -54,40 +54,41 @@ impl PartialOrd for Version {
 
 impl Ord for Version {
   fn cmp(&self, other: &Self) -> cmp::Ordering {
-    let self_comps: Vec<_> = self.components().collect();
-    let other_comps: Vec<_> = other.components().collect();
+    let mut self_components = self.components();
+    let mut other_components = other.components();
 
-    let min_len = self_comps.len().min(other_comps.len());
-
-    // Compare common prefix
-    for i in 0..min_len {
-      let ord = self_comps[i].cmp(&other_comps[i]);
-      if ord != cmp::Ordering::Equal {
-        return ord;
+    loop {
+      match (self_components.next(), other_components.next()) {
+        (Some(self_component), Some(other_component)) => {
+          let ord = self_component.cmp(&other_component);
+          if ord != cmp::Ordering::Equal {
+            return ord;
+          }
+        },
+        (Some(extra_self_component), None) => {
+          // Self has extra components - if they're non-numeric, self is a
+          // pre-release.
+          return if !extra_self_component.is_numeric()
+            || self_components.any(|component| !component.is_numeric())
+          {
+            cmp::Ordering::Less
+          } else {
+            cmp::Ordering::Greater
+          };
+        },
+        (None, Some(extra_other_component)) => {
+          // Other has extra components - if they're non-numeric, other is a
+          // pre-release.
+          return if !extra_other_component.is_numeric()
+            || other_components.any(|component| !component.is_numeric())
+          {
+            cmp::Ordering::Greater
+          } else {
+            cmp::Ordering::Less
+          };
+        },
+        (None, None) => return cmp::Ordering::Equal,
       }
-    }
-
-    // Equal so far - check for pre-release semantics
-    match self_comps.len().cmp(&other_comps.len()) {
-      cmp::Ordering::Equal => cmp::Ordering::Equal,
-      cmp::Ordering::Greater => {
-        // Self has extra components - if they're non-numeric, self is a
-        // pre-release
-        if self_comps[min_len..].iter().any(|c| !c.is_numeric()) {
-          cmp::Ordering::Less
-        } else {
-          cmp::Ordering::Greater
-        }
-      },
-      cmp::Ordering::Less => {
-        // Other has extra components - if they're non-numeric, other is a
-        // pre-release
-        if other_comps[min_len..].iter().any(|c| !c.is_numeric()) {
-          cmp::Ordering::Greater
-        } else {
-          cmp::Ordering::Less
-        }
-      },
     }
   }
 }
