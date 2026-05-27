@@ -20,6 +20,11 @@ use clap::Parser as _;
 use eyre::eyre;
 use yansi::Paint as _;
 
+// Moar speed! Shaves about a millisecond off.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 struct WriteFmt<W: io::Write>(W);
 
 impl<W: io::Write> fmt::Write for WriteFmt<W> {

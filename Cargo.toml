@@ -20,6 +20,7 @@ diff = "0.1.13"
 dix-diff = { path = "crates/dix-diff" }
 eyre = "0.6"
 itertools = "0.14.0"
+mimalloc = { version = "0.1.52", optional = true }
 rusqlite = { version = "0.40.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.149", optional = true }
@@ -34,8 +35,9 @@ proptest = "1.6.0"
 tempfile = "3.10.0"
 
 [features]
-default = ["json"]
+default = ["json", "mimalloc"]
 json = ["dep:serde", "dep:serde_json", "dix-diff/json"]
+mimalloc = ["dep:mimalloc"]
 
 # See:
 #  <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>
