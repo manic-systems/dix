@@ -6,13 +6,7 @@ use std::{
   num::NonZeroUsize,
 };
 
-use dix_diff::{
-  DiffStatus,
-  Version,
-  VersionAmount,
-  VersionDiff,
-  VersionPiece,
-};
+use dix_diff::VersionPiece;
 use itertools::{
   EitherOrBoth,
   Itertools,
@@ -27,7 +21,11 @@ use yansi::{
 use crate::{
   DerivationSelectionStatus,
   DiffReport,
+  DiffStatus,
   PackageDiff,
+  Version,
+  VersionAmount,
+  VersionDiff,
 };
 
 /// Writes a full diff report to the provided writer.

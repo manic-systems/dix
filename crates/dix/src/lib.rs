@@ -18,6 +18,12 @@ use eyre::{
 
 #[cfg(feature = "json")] pub mod json;
 
+pub use dix_diff::{
+  DiffStatus,
+  Version,
+  VersionAmount,
+  VersionDiff,
+};
 mod render;
 pub use render::write_diff_report;
 pub mod report;

@@ -3,12 +3,6 @@ use std::{
   path::Path,
 };
 
-use dix_diff::{
-  DiffStatus,
-  Version,
-  VersionAmount,
-  VersionDiff,
-};
 use eyre::{
   Result,
   WrapErr as _,
@@ -18,7 +12,11 @@ use serde::Serialize;
 use crate::{
   DerivationSelectionStatus,
   DiffReport,
+  DiffStatus,
   PackageDiff,
+  Version,
+  VersionAmount,
+  VersionDiff,
   query_diff_report,
 };
 
@@ -214,12 +212,6 @@ impl From<DerivationSelectionStatus> for JsonDerivationSelectionStatus {
 mod tests {
   use std::num::NonZeroUsize;
 
-  use dix_diff::{
-    DiffStatus,
-    Version,
-    VersionAmount,
-    VersionDiff,
-  };
   use size::Size;
 
   use super::*;
