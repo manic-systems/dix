@@ -76,8 +76,6 @@
             # TOML formatting.
             taplo
 
-            cargo-flamegraph
-
             cargo
             clippy
             rust-analyzer
