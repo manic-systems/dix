@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    systems.url = "github:nix-systems/default";
 
     fenix = {
       url = "github:nix-community/fenix";
@@ -15,12 +14,15 @@
     inputs@{
       self,
       nixpkgs,
-      systems,
       ...
     }:
     let
       inherit (nixpkgs) lib;
-      eachSystem = lib.genAttrs (import systems);
+      eachSystem = lib.genAttrs [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
       pkgsFor = eachSystem (
         system:
         import nixpkgs {
