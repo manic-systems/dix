@@ -1,4 +1,5 @@
 use std::{
+  cmp::Ordering,
   fmt::{
     self,
     Write as _,
@@ -140,10 +141,10 @@ fn write_size_diff(
     writer,
     "{header}: {size_diff}",
     header = "DIFF".bold(),
-    size_diff = if size_diff.bytes() > 0 {
-      size_diff.green()
-    } else {
-      size_diff.red()
+    size_diff = match size_diff.bytes().cmp(&0) {
+      Ordering::Less => size_diff.green(),
+      Ordering::Equal => size_diff.resetting(),
+      Ordering::Greater => size_diff.red(),
     },
   )
 }
