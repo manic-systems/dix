@@ -18,12 +18,12 @@
     }:
     let
       inherit (nixpkgs) lib;
-      eachSystem = lib.genAttrs [
+      forEachSystem = lib.genAttrs [
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
       ];
-      pkgsFor = eachSystem (
+      pkgsForEach = forEachSystem (
         system:
         import nixpkgs {
           localSystem.system = system;
@@ -69,7 +69,7 @@
             strictDeps = true;
           };
         }
-      ) pkgsFor;
+      ) pkgsForEach;
 
       devShells = lib.mapAttrs (system: pkgs: {
         default = self.devShells.${system}.dix;
@@ -101,6 +101,6 @@
 
           env.RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
         };
-      }) pkgsFor;
+      }) pkgsForEach;
     };
 }
