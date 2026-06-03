@@ -5,6 +5,7 @@ members = ["crates/dix", "crates/dix-diff"]
 [workspace.package]
 version = "1.5.0-dev"
 edition = "2024"
+rust-version = "1.95.0"
 homepage = "https://github.com/faukah/dix"
 repository = "https://github.com/faukah/dix"
 license = "GPL-3.0-only"
