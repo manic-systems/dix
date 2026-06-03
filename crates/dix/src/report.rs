@@ -9,11 +9,8 @@ use std::{
 
 use dix_diff::{
   Diff as EngineDiff,
-  DiffStatus,
   Package,
   PackageSnapshot,
-  Version,
-  VersionDiff,
   diff_snapshots,
 };
 use eyre::{
@@ -24,7 +21,10 @@ use eyre::{
 use size::Size;
 
 use crate::{
+  DiffStatus,
   StorePath,
+  Version,
+  VersionDiff,
   store::{
     CombinedStoreBackend,
     StoreBackend,
