@@ -1,17 +1,10 @@
 {
   description = "Dix - Diff Nix";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-
-    fenix = {
-      url = "github:nix-community/fenix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs =
-    inputs@{
+    {
       self,
       nixpkgs,
       ...
@@ -85,18 +78,11 @@
 
             cargo-flamegraph
 
-            (inputs.fenix.packages.${system}.combine (
-              with inputs.fenix.packages.${system};
-              [
-                stable.cargo
-                stable.clippy
-                stable.rust-analyzer
-                stable.rustc
-
-                # nightly rustfmt for better formatting
-                default.rustfmt
-              ]
-            ))
+            cargo
+            clippy
+            rust-analyzer
+            rustc
+            (rustfmt.override { asNightly = true; })
           ];
 
           env.RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
