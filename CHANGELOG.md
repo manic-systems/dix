@@ -34,9 +34,9 @@ This is a changelog of the `dix` repository. It follows the
   such as `Changed`, `Mixed`, `Upgraded`, and `Downgraded`.
 - Changed version counts to use `VersionAmount` and `VersionDiff::AmountChanged`
   instead of storing counts on `Version`.
-- Changed version status classification to treat Git short hash-only component
-  changes as unordered. These changes are now reported as changed instead of
-  arbitrary upgrades or downgrades.
+- Changed version parsing and status classification to treat Git short or full
+  hash suffixes as unordered versions. These changes are now reported as
+  changed instead of arbitrary upgrades or downgrades.
 - Changed report querying from `DiffReport::query(...)` to the
   `query_diff_report(...)` free function.
 - Changed `DiffReport` and `PathStats` to expose read-only accessor methods

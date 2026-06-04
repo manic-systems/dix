@@ -455,4 +455,53 @@ mod tests {
       PathStats::new_for_test(3, 2, 1, 2),
     );
   }
+
+  #[test]
+  fn between_matches_alpha_leading_git_hash_versions() {
+    let old_hash = "0bf8387987c21bf2f8ed41d2575a8f22b139687f";
+    let new_hash = "cd1931314beafeebc957964c65802961e283411e";
+    let old_path = store_path(&format!("helix-tree-sitter-pod-{old_hash}"));
+    let new_path = store_path(&format!("helix-tree-sitter-pod-{new_hash}"));
+    let path_stats = PathStats::between(
+      std::slice::from_ref(&old_path),
+      std::slice::from_ref(&new_path),
+    );
+
+    let report = DiffReport::from_queried_snapshots(
+      QueriedSnapshots {
+        old: SnapshotPackages::from_store_paths(
+          [old_path],
+          std::iter::empty(),
+          SnapshotContext {
+            dependencies: "old dependency",
+            selected:     "old selected",
+          },
+        ),
+        new: SnapshotPackages::from_store_paths(
+          [new_path],
+          std::iter::empty(),
+          SnapshotContext {
+            dependencies: "new dependency",
+            selected:     "new selected",
+          },
+        ),
+        path_stats,
+      },
+      Size::from_bytes(0),
+      Size::from_bytes(0),
+    );
+
+    assert_eq!(report.diffs.len(), 1);
+    let diff = &report.diffs[0];
+    assert_eq!(diff.name, "helix-tree-sitter-pod");
+    assert_eq!(diff.status, DiffStatus::Changed);
+    assert_eq!(diff.versions.len(), 1);
+    match &diff.versions[0] {
+      VersionDiff::Changed { old, new } => {
+        assert_eq!(old.version.name, old_hash);
+        assert_eq!(new.version.name, new_hash);
+      },
+      other => panic!("expected changed version diff, got {other:?}"),
+    }
+  }
 }

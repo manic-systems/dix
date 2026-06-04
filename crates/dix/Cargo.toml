@@ -19,7 +19,6 @@ derive_more = { workspace = true }
 diff = { workspace = true }
 eyre = { workspace = true }
 itertools = { workspace = true }
-regex = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
