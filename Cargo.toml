@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/dix", "crates/dix-diff"]
 
 [workspace.package]
-version = "1.5.0-dev"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.95.0"
 homepage = "https://github.com/faukah/dix"
@@ -15,7 +15,7 @@ categories = ["command-line-utilities"]
 [workspace.dependencies]
 # Keep this exact: packaged `dix` resolves `dix-diff` from crates.io after Cargo
 # strips the local path, so release `dix-diff` before `dix`.
-dix-diff = { path = "crates/dix-diff", version = "=1.5.0-dev" }
+dix-diff = { path = "crates/dix-diff", version = "=2.0.0" }
 
 clap = { version = "4.5.37", features = ["derive"] }
 clap-verbosity-flag = "3.0.2"
