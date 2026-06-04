@@ -1,10 +1,9 @@
 use std::{
-  collections::HashSet,
-  path::{
-    Path,
-    PathBuf,
+  collections::{
+    BTreeMap,
+    HashSet,
   },
-  thread,
+  path::Path,
 };
 
 use dix_diff::{
@@ -16,7 +15,6 @@ use dix_diff::{
 use eyre::{
   Result,
   WrapErr as _,
-  eyre,
 };
 use size::Size;
 
@@ -28,8 +26,11 @@ use crate::{
   store::{
     CombinedStoreBackend,
     StoreBackend,
+    StorePathInfo,
   },
 };
+
+const PACKAGE_SIZE_DELTA_SIGNIFICANCE_THRESHOLD_BYTES: i64 = 8 * 1024;
 
 #[derive(Debug)]
 pub struct DiffReport {
@@ -54,6 +55,13 @@ pub struct PackageDiff {
   pub status:               DiffStatus,
   pub selection:            DerivationSelectionStatus,
   pub has_omitted_versions: bool,
+  pub size:                 PackageSizeDelta,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageSizeDelta {
+  old: Size,
+  new: Size,
 }
 
 impl PackageDiff {
@@ -61,17 +69,65 @@ impl PackageDiff {
     diff: EngineDiff,
     selected_old: &HashSet<String>,
     selected_new: &HashSet<String>,
+    old_sizes: &BTreeMap<String, Size>,
+    new_sizes: &BTreeMap<String, Size>,
   ) -> Self {
+    let name = diff.name;
     Self {
-      selection:            DerivationSelectionStatus::from_names(
-        &diff.name,
+      selection: DerivationSelectionStatus::from_names(
+        &name,
         selected_old,
         selected_new,
       ),
-      name:                 diff.name,
-      versions:             diff.versions,
-      status:               diff.status,
+      size: PackageSizeDelta::between(&name, old_sizes, new_sizes),
+      name,
+      versions: diff.versions,
+      status: diff.status,
       has_omitted_versions: diff.has_omitted_versions,
+    }
+  }
+}
+
+impl PackageSizeDelta {
+  #[must_use]
+  pub const fn new(old: Size, new: Size) -> Self {
+    Self { old, new }
+  }
+
+  #[must_use]
+  pub const fn old_size(self) -> Size {
+    self.old
+  }
+
+  #[must_use]
+  pub const fn new_size(self) -> Size {
+    self.new
+  }
+
+  #[must_use]
+  pub fn delta(self) -> Size {
+    self.new - self.old
+  }
+
+  #[must_use]
+  pub fn is_significant(self) -> bool {
+    self.delta().bytes().abs() > PACKAGE_SIZE_DELTA_SIGNIFICANCE_THRESHOLD_BYTES
+  }
+
+  fn between(
+    name: &str,
+    old_sizes: &BTreeMap<String, Size>,
+    new_sizes: &BTreeMap<String, Size>,
+  ) -> Self {
+    Self {
+      old: old_sizes
+        .get(name)
+        .copied()
+        .unwrap_or_else(|| Size::from_bytes(0)),
+      new: new_sizes
+        .get(name)
+        .copied()
+        .unwrap_or_else(|| Size::from_bytes(0)),
     }
   }
 }
@@ -142,31 +198,73 @@ impl DiffReport {
   }
 
   #[must_use]
-  fn from_queried_snapshots(
-    snapshots: QueriedSnapshots,
-    size_old: Size,
-    size_new: Size,
-  ) -> Self {
+  fn from_queried_snapshots(snapshots: QueriedSnapshots) -> Self {
     let QueriedSnapshots {
       old,
       new,
       path_stats,
+      size_old,
+      size_new,
     } = snapshots;
-    let (old_snapshot, selected_old) = old.into_snapshot_parts();
-    let (new_snapshot, selected_new) = new.into_snapshot_parts();
+    let old = old.into_snapshot_parts();
+    let new = new.into_snapshot_parts();
 
     Self {
-      diffs: diff_snapshots(&old_snapshot, &new_snapshot)
-        .into_iter()
-        .map(|diff| {
-          PackageDiff::from_engine(diff, &selected_old, &selected_new)
-        })
-        .collect(),
+      diffs: package_diffs_with_sizes(&old, &new),
       path_stats,
       size_old,
       size_new,
     }
   }
+}
+
+fn package_diffs_with_sizes(
+  old: &SnapshotParts,
+  new: &SnapshotParts,
+) -> Vec<PackageDiff> {
+  let mut diffs = diff_snapshots(&old.snapshot, &new.snapshot)
+    .into_iter()
+    .map(|diff| {
+      let name = diff.name.clone();
+      (
+        name,
+        PackageDiff::from_engine(
+          diff,
+          &old.selected,
+          &new.selected,
+          &old.package_sizes,
+          &new.package_sizes,
+        ),
+      )
+    })
+    .collect::<BTreeMap<_, _>>();
+
+  for name in old.package_sizes.keys().chain(new.package_sizes.keys()) {
+    if diffs.contains_key(name) {
+      continue;
+    }
+
+    let size =
+      PackageSizeDelta::between(name, &old.package_sizes, &new.package_sizes);
+    if !size.is_significant() {
+      continue;
+    }
+
+    diffs.insert(name.clone(), PackageDiff {
+      name: name.clone(),
+      versions: Vec::new(),
+      status: DiffStatus::Changed,
+      selection: DerivationSelectionStatus::from_names(
+        name,
+        &old.selected,
+        &new.selected,
+      ),
+      has_omitted_versions: false,
+      size,
+    });
+  }
+
+  diffs.into_values().collect()
 }
 
 impl PathStats {
@@ -205,6 +303,7 @@ impl PathStats {
     }
   }
 
+  #[cfg(test)]
   #[must_use]
   fn between(old: &[StorePath], new: &[StorePath]) -> Self {
     let old_paths = old.iter().collect::<HashSet<_>>();
@@ -217,41 +316,105 @@ impl PathStats {
       removed: old_paths.difference(&new_paths).count(),
     }
   }
+
+  #[must_use]
+  fn between_path_info(old: &[StorePathInfo], new: &[StorePathInfo]) -> Self {
+    let old_paths = old.iter().map(StorePathInfo::path).collect::<HashSet<_>>();
+    let new_paths = new.iter().map(StorePathInfo::path).collect::<HashSet<_>>();
+
+    Self {
+      old:     old_paths.len(),
+      new:     new_paths.len(),
+      added:   new_paths.difference(&old_paths).count(),
+      removed: old_paths.difference(&new_paths).count(),
+    }
+  }
+}
+
+fn total_nar_size(paths: &[StorePathInfo]) -> Size {
+  Size::from_bytes(
+    paths
+      .iter()
+      .map(|path| path.nar_size().bytes())
+      .sum::<i64>(),
+  )
+}
+
+fn add_package_size(
+  package_sizes: &mut BTreeMap<String, Size>,
+  name: &str,
+  nar_size: Size,
+) {
+  package_sizes
+    .entry(name.to_owned())
+    .and_modify(|size| {
+      *size = Size::from_bytes(size.bytes() + nar_size.bytes());
+    })
+    .or_insert(nar_size);
 }
 
 struct SnapshotPackages {
   packages:       Vec<Package>,
   selected_names: HashSet<String>,
+  package_sizes:  BTreeMap<String, Size>,
 }
 
 struct QueriedSnapshots {
   old:        SnapshotPackages,
   new:        SnapshotPackages,
   path_stats: PathStats,
+  size_old:   Size,
+  size_new:   Size,
 }
 
 impl SnapshotPackages {
   fn from_store_paths(
-    dependencies: impl IntoIterator<Item = StorePath>,
+    dependencies: impl IntoIterator<Item = StorePathInfo>,
     selected: impl IntoIterator<Item = StorePath>,
     context: SnapshotContext,
   ) -> Self {
+    let mut packages = Vec::new();
+    let mut package_sizes = BTreeMap::<String, Size>::new();
+
+    for info in dependencies {
+      let Some(parsed) =
+        parse_store_path_lossy(info.path(), context.dependencies)
+      else {
+        continue;
+      };
+      add_package_size(&mut package_sizes, &parsed.name, info.nar_size());
+      packages.push(Package::new(
+        parsed.name,
+        parsed
+          .version
+          .map_or_else(|| "<none>".into(), Version::from),
+      ));
+    }
+
     Self {
-      packages:       dependencies
-        .into_iter()
-        .filter_map(|path| package_from_store_path(&path, context.dependencies))
-        .collect(),
+      packages,
       selected_names: selected
         .into_iter()
         .filter_map(|path| parse_store_path_lossy(&path, context.selected))
         .map(|parsed| parsed.name)
         .collect(),
+      package_sizes,
     }
   }
 
-  fn into_snapshot_parts(self) -> (PackageSnapshot, HashSet<String>) {
-    (PackageSnapshot::new(self.packages), self.selected_names)
+  fn into_snapshot_parts(self) -> SnapshotParts {
+    SnapshotParts {
+      snapshot:      PackageSnapshot::new(self.packages),
+      selected:      self.selected_names,
+      package_sizes: self.package_sizes,
+    }
   }
+}
+
+struct SnapshotParts {
+  snapshot:      PackageSnapshot,
+  selected:      HashSet<String>,
+  package_sizes: BTreeMap<String, Size>,
 }
 
 #[derive(Clone, Copy)]
@@ -269,8 +432,7 @@ struct ParsedStorePath {
 ///
 /// # Errors
 ///
-/// Returns an error if store connection, package querying, closure-size
-/// querying, or the background size worker fails.
+/// Returns an error if store connection or package querying fails.
 pub fn query_diff_report(
   path_old: &Path,
   path_new: &Path,
@@ -283,21 +445,11 @@ pub fn query_diff_report(
     "starting diff report computation"
   );
 
-  let size_handle = spawn_closure_sizes(
-    path_old.to_path_buf(),
-    path_new.to_path_buf(),
-    force_correctness,
-  );
   let snapshots = CombinedStoreBackend::query_with_correctness(
     force_correctness,
     |backend| query_report_snapshots(backend, path_old, path_new),
-  );
-  let sizes = join_closure_sizes(size_handle);
-
-  let snapshots = snapshots?;
-  let (size_old, size_new) = sizes?;
-  let report =
-    DiffReport::from_queried_snapshots(snapshots, size_old, size_new);
+  )?;
+  let report = DiffReport::from_queried_snapshots(snapshots);
   let path_stats = report.path_stats();
 
   tracing::info!(
@@ -319,15 +471,23 @@ fn query_report_snapshots(
   path_old: &Path,
   path_new: &Path,
 ) -> Result<QueriedSnapshots> {
-  tracing::debug!("querying dependencies for old path");
-  let paths_old = backend.query_dependents(path_old).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_old.display())
-  })?;
+  tracing::debug!("querying closure path info for old path");
+  let paths_old =
+    backend.query_closure_path_info(path_old).with_context(|| {
+      format!(
+        "failed to query closure path info of '{}'",
+        path_old.display()
+      )
+    })?;
 
-  tracing::debug!("querying dependencies for new path");
-  let paths_new = backend.query_dependents(path_new).with_context(|| {
-    format!("failed to query dependencies of '{}'", path_new.display())
-  })?;
+  tracing::debug!("querying closure path info for new path");
+  let paths_new =
+    backend.query_closure_path_info(path_new).with_context(|| {
+      format!(
+        "failed to query closure path info of '{}'",
+        path_new.display()
+      )
+    })?;
 
   tracing::debug!("querying system derivations for old path");
   let system_derivations_old = backend
@@ -349,7 +509,9 @@ fn query_report_snapshots(
       )
     })?;
 
-  let path_stats = PathStats::between(&paths_old, &paths_new);
+  let path_stats = PathStats::between_path_info(&paths_old, &paths_new);
+  let size_old = total_nar_size(&paths_old);
+  let size_new = total_nar_size(&paths_new);
 
   Ok(QueriedSnapshots {
     old: SnapshotPackages::from_store_paths(
@@ -369,17 +531,8 @@ fn query_report_snapshots(
       },
     ),
     path_stats,
-  })
-}
-
-fn package_from_store_path(path: &StorePath, context: &str) -> Option<Package> {
-  parse_store_path_lossy(path, context).map(|parsed| {
-    Package::new(
-      parsed.name,
-      parsed
-        .version
-        .map_or_else(|| "<none>".into(), Version::from),
-    )
+    size_old,
+    size_new,
   })
 }
 
@@ -401,43 +554,34 @@ fn parse_store_path_lossy(
   }
 }
 
-fn spawn_closure_sizes(
-  path_old: PathBuf,
-  path_new: PathBuf,
-  force_correctness: bool,
-) -> thread::JoinHandle<Result<(Size, Size)>> {
-  tracing::debug!("calculating closure sizes in background");
-
-  thread::spawn(move || {
-    CombinedStoreBackend::query_with_correctness(force_correctness, |backend| {
-      Ok((
-        backend.query_closure_size(&path_old)?,
-        backend.query_closure_size(&path_new)?,
-      ))
-    })
-  })
-}
-
-fn join_closure_sizes(
-  handle: thread::JoinHandle<Result<(Size, Size)>>,
-) -> Result<(Size, Size)> {
-  handle.join().map_err(|_| {
-    tracing::error!("closure size thread panicked");
-    eyre!("failed to get closure size due to thread error")
-  })?
-}
-
 #[cfg(test)]
 mod tests {
   use std::path::PathBuf;
 
   use super::*;
 
+  fn store_path_with_hash(hash: &str, name: &str) -> StorePath {
+    StorePath::try_from(PathBuf::from(format!("/nix/store/{hash}-{name}")))
+      .unwrap_or_else(|err| panic!("failed to create test store path: {err}"))
+  }
+
   fn store_path(name: &str) -> StorePath {
-    StorePath::try_from(PathBuf::from(format!(
-      "/nix/store/0123456789abcdefghijklmnopqrstuv-{name}"
-    )))
-    .unwrap_or_else(|err| panic!("failed to create test store path: {err}"))
+    store_path_with_hash("0123456789abcdefghijklmnopqrstuv", name)
+  }
+
+  fn store_path_info(name: &str, nar_size: i64) -> StorePathInfo {
+    StorePathInfo::new(store_path(name), Size::from_bytes(nar_size))
+  }
+
+  fn store_path_info_with_hash(
+    hash: &str,
+    name: &str,
+    nar_size: i64,
+  ) -> StorePathInfo {
+    StorePathInfo::new(
+      store_path_with_hash(hash, name),
+      Size::from_bytes(nar_size),
+    )
   }
 
   #[test]
@@ -460,36 +604,36 @@ mod tests {
   fn between_matches_alpha_leading_git_hash_versions() {
     let old_hash = "0bf8387987c21bf2f8ed41d2575a8f22b139687f";
     let new_hash = "cd1931314beafeebc957964c65802961e283411e";
-    let old_path = store_path(&format!("helix-tree-sitter-pod-{old_hash}"));
-    let new_path = store_path(&format!("helix-tree-sitter-pod-{new_hash}"));
+    let old_info =
+      store_path_info(&format!("helix-tree-sitter-pod-{old_hash}"), 100);
+    let new_info =
+      store_path_info(&format!("helix-tree-sitter-pod-{new_hash}"), 200);
     let path_stats = PathStats::between(
-      std::slice::from_ref(&old_path),
-      std::slice::from_ref(&new_path),
+      std::slice::from_ref(old_info.path()),
+      std::slice::from_ref(new_info.path()),
     );
 
-    let report = DiffReport::from_queried_snapshots(
-      QueriedSnapshots {
-        old: SnapshotPackages::from_store_paths(
-          [old_path],
-          std::iter::empty(),
-          SnapshotContext {
-            dependencies: "old dependency",
-            selected:     "old selected",
-          },
-        ),
-        new: SnapshotPackages::from_store_paths(
-          [new_path],
-          std::iter::empty(),
-          SnapshotContext {
-            dependencies: "new dependency",
-            selected:     "new selected",
-          },
-        ),
-        path_stats,
-      },
-      Size::from_bytes(0),
-      Size::from_bytes(0),
-    );
+    let report = DiffReport::from_queried_snapshots(QueriedSnapshots {
+      old: SnapshotPackages::from_store_paths(
+        [old_info],
+        std::iter::empty(),
+        SnapshotContext {
+          dependencies: "old dependency",
+          selected:     "old selected",
+        },
+      ),
+      new: SnapshotPackages::from_store_paths(
+        [new_info],
+        std::iter::empty(),
+        SnapshotContext {
+          dependencies: "new dependency",
+          selected:     "new selected",
+        },
+      ),
+      path_stats,
+      size_old: Size::from_bytes(100),
+      size_new: Size::from_bytes(200),
+    });
 
     assert_eq!(report.diffs.len(), 1);
     let diff = &report.diffs[0];
@@ -503,5 +647,55 @@ mod tests {
       },
       other => panic!("expected changed version diff, got {other:?}"),
     }
+    assert_eq!(diff.size.old_size(), Size::from_bytes(100));
+    assert_eq!(diff.size.new_size(), Size::from_bytes(200));
+  }
+
+  #[test]
+  fn includes_size_only_package_diff_above_threshold() {
+    let old_info = store_path_info_with_hash(
+      "0123456789abcdefghijklmnopqrstuv",
+      "source",
+      100,
+    );
+    let new_info = store_path_info_with_hash(
+      "vutsrqponmlkjihgfedcba9876543210",
+      "source",
+      9_000,
+    );
+    let path_stats = PathStats::between(
+      std::slice::from_ref(old_info.path()),
+      std::slice::from_ref(new_info.path()),
+    );
+
+    let report = DiffReport::from_queried_snapshots(QueriedSnapshots {
+      old: SnapshotPackages::from_store_paths(
+        [old_info],
+        std::iter::empty(),
+        SnapshotContext {
+          dependencies: "old dependency",
+          selected:     "old selected",
+        },
+      ),
+      new: SnapshotPackages::from_store_paths(
+        [new_info],
+        std::iter::empty(),
+        SnapshotContext {
+          dependencies: "new dependency",
+          selected:     "new selected",
+        },
+      ),
+      path_stats,
+      size_old: Size::from_bytes(100),
+      size_new: Size::from_bytes(9_000),
+    });
+
+    assert_eq!(report.diffs.len(), 1);
+    let diff = &report.diffs[0];
+    assert_eq!(diff.name, "source");
+    assert_eq!(diff.status, DiffStatus::Changed);
+    assert!(diff.versions.is_empty());
+    assert_eq!(diff.size.old_size(), Size::from_bytes(100));
+    assert_eq!(diff.size.new_size(), Size::from_bytes(9_000));
   }
 }

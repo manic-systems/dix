@@ -31,7 +31,7 @@ pub const QUERY_SYSTEM_DERIVATIONS: &str = "
       JOIN ValidPaths vp ON vp.id = pkgs.id;
     ";
 
-pub const QUERY_CLOSURE_SIZE: &str = "
+pub const QUERY_CLOSURE_PATH_INFO: &str = "
   WITH RECURSIVE
     graph(p) AS (
       SELECT id
@@ -41,6 +41,7 @@ pub const QUERY_CLOSURE_SIZE: &str = "
       SELECT reference FROM Refs
       JOIN graph ON referrer = p
     )
-  SELECT SUM(narSize) as sum from graph
-  JOIN ValidPaths ON p = id;
+  SELECT path, narSize from graph
+  JOIN ValidPaths ON p = id
+  ORDER BY path;
 ";

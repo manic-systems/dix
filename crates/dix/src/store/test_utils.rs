@@ -410,6 +410,24 @@ mod tests {
   }
 
   #[test]
+  fn test_db_query_closure_path_info() {
+    let db = create_simple_test_db().unwrap();
+    let db_path = db.db_path().to_string_lossy().to_string();
+    let root_fixture = fixtures::store_path("root-package");
+    let root = db.resolve_fixture_path(&root_fixture);
+
+    let mut conn = DbConnection::new(&db_path);
+    conn.connect().unwrap();
+    let info = conn.query_closure_path_info(&root).unwrap();
+    assert_eq!(info.len(), 3);
+    assert_eq!(
+      info.iter().map(|path| path.nar_size().bytes()).sum::<i64>(),
+      200,
+    );
+    conn.close().unwrap();
+  }
+
+  #[test]
   fn test_db_query_dependents() {
     let db = create_diamond_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();

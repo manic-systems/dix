@@ -23,6 +23,7 @@ use size::Size;
 use tracing::warn;
 
 use crate::StorePath;
+
 /// The normal database connection
 pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 /// A backup database connection that can access the database
@@ -33,6 +34,29 @@ pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 /// `nixos-rebuild` modifying the database)
 pub const DATABASE_PATH_IMMUTABLE: &str =
   "file:/nix/var/nix/db/db.sqlite?immutable=1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorePathInfo {
+  path:     StorePath,
+  nar_size: Size,
+}
+
+impl StorePathInfo {
+  #[must_use]
+  pub const fn new(path: StorePath, nar_size: Size) -> Self {
+    Self { path, nar_size }
+  }
+
+  #[must_use]
+  pub const fn path(&self) -> &StorePath {
+    &self.path
+  }
+
+  #[must_use]
+  pub const fn nar_size(&self) -> Size {
+    self.nar_size
+  }
+}
 
 /// Defines an interface for interacting with a Nix database.
 ///
@@ -58,7 +82,15 @@ pub trait StoreBackend: Display {
   /// # Errors
   ///
   /// Returns an error if the backend query fails or the size cannot be read.
-  fn query_closure_size(&self, path: &Path) -> Result<Size>;
+  fn query_closure_size(&self, path: &Path) -> Result<Size> {
+    Ok(Size::from_bytes(
+      self
+        .query_closure_path_info(path)?
+        .iter()
+        .map(|info| info.nar_size().bytes())
+        .sum::<i64>(),
+    ))
+  }
   /// Queries derivations selected by a system profile.
   ///
   /// # Errors
@@ -71,6 +103,13 @@ pub trait StoreBackend: Display {
   ///
   /// Returns an error if the backend query fails.
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>>;
+  /// Queries all dependencies of a store path with their NAR sizes.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the backend query fails or path information cannot be
+  /// read.
+  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>>;
 }
 
 /// combines multiple store backends by falling back to the next one if the
@@ -265,10 +304,6 @@ impl StoreBackend for CombinedStoreBackend {
     )
   }
 
-  fn query_closure_size(&self, path: &Path) -> Result<Size> {
-    self.fallback_query(|backend, path| backend.query_closure_size(path), path)
-  }
-
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     self.fallback_query(
       |backend, system| backend.query_system_derivations(system),
@@ -278,6 +313,13 @@ impl StoreBackend for CombinedStoreBackend {
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
     self.fallback_query(|backend, path| backend.query_dependents(path), path)
+  }
+
+  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
+    self.fallback_query(
+      |backend, path| backend.query_closure_path_info(path),
+      path,
+    )
   }
 }
 
@@ -335,15 +377,6 @@ mod test {
       Ok(())
     }
 
-    fn query_closure_size(&self, _path: &Path) -> Result<Size> {
-      *self.query_called.borrow_mut() = true;
-      if self.fail_query {
-        Err(eyre!("Query failed"))
-      } else {
-        Ok(Size::from_bytes(100))
-      }
-    }
-
     fn query_system_derivations(
       &self,
       _system: &Path,
@@ -362,6 +395,24 @@ mod test {
         Err(eyre!("Query failed"))
       } else {
         Ok(Vec::new())
+      }
+    }
+
+    fn query_closure_path_info(
+      &self,
+      _path: &Path,
+    ) -> Result<Vec<StorePathInfo>> {
+      *self.query_called.borrow_mut() = true;
+      if self.fail_query {
+        Err(eyre!("Query failed"))
+      } else {
+        Ok(vec![StorePathInfo::new(
+          StorePath::try_from(
+            Path::new("/nix/store/0123456789abcdefghijklmnopqrstuv-dummy")
+              .to_path_buf(),
+          )?,
+          Size::from_bytes(100),
+        )])
       }
     }
   }
