@@ -179,7 +179,9 @@ fn display_diff(
     out,
     "{arrows} {old}",
     arrows = "<<<".bold(),
-    old = old_path.display(),
+    old = fs::canonicalize(old_path)
+      .unwrap_or_else(|_| old_path.to_path_buf())
+      .display(),
   )?;
   writeln!(
     out,
