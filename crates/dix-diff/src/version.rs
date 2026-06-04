@@ -51,7 +51,7 @@ impl Version {
 
   pub(crate) fn change_ordering(&self, other: &Self) -> VersionChangeOrdering {
     match self.compare_components_with(other, |self_comp, other_comp| {
-      if self_comp.is_git_short_hash_pair(other_comp) {
+      if self_comp.is_git_hash_pair(other_comp) {
         ComparedVersionComponents::Unordered
       } else {
         ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
@@ -253,23 +253,22 @@ impl VersionComponent<'_> {
     self.is_numeric().then(|| self.0.parse().ok()).flatten()
   }
 
-  fn is_git_short_hash_pair(&self, other: Self) -> bool {
-    self.is_hex_hash_component()
-      && other.is_hex_hash_component()
-      && (self.has_ascii_hex_letter() || other.has_ascii_hex_letter())
+  fn is_git_hash_pair(&self, other: Self) -> bool {
+    is_hex_hash_component(self.0)
+      && is_hex_hash_component(other.0)
+      && (has_ascii_hex_letter(self.0) || has_ascii_hex_letter(other.0))
   }
+}
 
-  fn is_hex_hash_component(&self) -> bool {
-    (7..=40).contains(&self.0.len())
-      && self.0.bytes().all(|b| b.is_ascii_hexdigit())
-  }
+fn is_hex_hash_component(component: &str) -> bool {
+  (7..=40).contains(&component.len())
+    && component.bytes().all(|b| b.is_ascii_hexdigit())
+}
 
-  fn has_ascii_hex_letter(&self) -> bool {
-    self
-      .0
-      .bytes()
-      .any(|b| matches!(b, b'a'..=b'f' | b'A'..=b'F'))
-  }
+fn has_ascii_hex_letter(component: &str) -> bool {
+  component
+    .bytes()
+    .any(|b| matches!(b, b'a'..=b'f' | b'A'..=b'F'))
 }
 
 impl PartialOrd for VersionComponent<'_> {
@@ -413,6 +412,15 @@ mod tests {
   fn change_ordering_treats_git_short_hash_pair_as_unordered() {
     let old = Version::new("0.11.1-946aa34");
     let new = Version::new("0.11.1-3564204");
+
+    assert_eq!(old.change_ordering(&new), VersionChangeOrdering::Unordered);
+    assert_eq!(new.change_ordering(&old), VersionChangeOrdering::Unordered);
+  }
+
+  #[test]
+  fn change_ordering_treats_git_long_hash_pair_as_unordered() {
+    let old = Version::new("0bf8387987c21bf2f8ed41d2575a8f22b139687f");
+    let new = Version::new("cd1931314beafeebc957964c65802961e283411e");
 
     assert_eq!(old.change_ordering(&new), VersionChangeOrdering::Unordered);
     assert_eq!(new.change_ordering(&old), VersionChangeOrdering::Unordered);

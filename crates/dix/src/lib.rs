@@ -1,9 +1,6 @@
-use std::{
-  path::{
-    Path,
-    PathBuf,
-  },
-  sync,
+use std::path::{
+  Path,
+  PathBuf,
 };
 
 use derive_more::Deref;
@@ -64,19 +61,9 @@ impl StorePath {
   /// Parses a Nix store path to extract the packages name and possibly its
   /// version.
   ///
-  /// This function first drops the inputs first 44 chars, since that is exactly
-  /// the length of the `/nix/store/0004yybkm5hnwjyxv129js3mjp7kbrax-` prefix.
-  /// Then it matches that against our store path regex.
+  /// This function first extracts the store path name after the store hash. It
+  /// then treats a digit-starting or Git-hash-like suffix as the version.
   fn parse_name_and_version(&self) -> Result<(&str, Option<&str>)> {
-    static STORE_PATH_REGEX: sync::LazyLock<regex::Regex> = sync::LazyLock::new(
-      || {
-        regex::Regex::new(
-	          r"(?<prefix>((/nix/store/)|(/tmp/.+?/))[a-zA-Z0-9]{32}-)(?<name>.+?)(-(?<version>[0-9].*?))?$",
-	        )
-	        .unwrap_or_else(|err| panic!("failed to compile regex for Nix store paths: {err}"))
-      },
-    );
-
     let path = self.to_str().with_context(|| {
       format!(
         "failed to convert path '{path}' to valid unicode",
@@ -84,23 +71,61 @@ impl StorePath {
       )
     })?;
 
-    let captures = STORE_PATH_REGEX.captures(path).ok_or_else(|| {
+    let file_name = self
+      .file_name()
+      .and_then(|file_name| file_name.to_str())
+      .with_context(|| {
+      format!("failed to extract valid unicode file name from path '{path}'")
+    })?;
+
+    let (store_hash, name) = file_name.split_once('-').ok_or_else(|| {
       eyre!("path '{path}' does not match expected Nix store format")
     })?;
 
-    let name = captures.name("name").map_or("", |capture| capture.as_str());
-    if name.is_empty() {
-      bail!("failed to extract name from path '{path}'");
+    if store_hash.len() != 32
+      || !store_hash.bytes().all(|byte| byte.is_ascii_alphanumeric())
+      || name.is_empty()
+    {
+      bail!("path '{path}' does not match expected Nix store format");
     }
 
-    let version = captures
-      .name("version")
-      .map(|capture| capture.as_str().trim_start_matches('-'));
+    let (name, version) = split_name_and_version(name);
 
     tracing::trace!(name = name, version = ?version, "parsed name and version from path");
 
     Ok((name, version))
   }
+}
+
+fn split_name_and_version(name: &str) -> (&str, Option<&str>) {
+  for (index, _) in name.match_indices('-') {
+    if index == 0 {
+      continue;
+    }
+
+    let suffix = &name[index + 1..];
+    if is_version_suffix(suffix) {
+      return (&name[..index], Some(suffix));
+    }
+  }
+
+  (name, None)
+}
+
+fn is_version_suffix(suffix: &str) -> bool {
+  suffix
+    .bytes()
+    .next()
+    .is_some_and(|byte| byte.is_ascii_digit())
+    || looks_like_git_hash_component(suffix)
+}
+
+fn looks_like_git_hash_component(component: &str) -> bool {
+  (7..=40).contains(&component.len())
+    && component.bytes().all(|byte| byte.is_ascii_hexdigit())
+    && component
+      .bytes()
+      .any(|byte| matches!(byte, b'a'..=b'f' | b'A'..=b'F'))
 }
 
 fn path_to_canonical_string(path: &Path) -> Result<String> {
@@ -135,7 +160,7 @@ mod tests {
 
   proptest! {
     #[test]
-    fn parses_valid_paths(s in r"((/nix/store/)|(/tmp/.+?/))[a-z0-9A-Z]{32}-.+([0-9][-a-z0-9A-Z\.]*)?") {
+    fn parses_valid_paths(s in r"((/nix/store/)|(/tmp/[A-Za-z0-9._+-]+/))[a-z0-9A-Z]{32}-[-A-Za-z0-9._+~]{1,64}") {
       let path = PathBuf::from(s);
       let store_path = StorePath::try_from(path)
         .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
@@ -198,6 +223,35 @@ mod tests {
     assert_eq!(name, "foo");
     assert_eq!(version, Some("1.0"));
   }
+
+  #[test]
+  fn test_name_and_version_parsing_hyphenated_version() {
+    let path =
+      PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0-bin");
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
+    let (name, version) = store_path
+      .parse_name_and_version()
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
+    assert_eq!(name, "foo");
+    assert_eq!(version, Some("1.0-bin"));
+  }
+
+  #[test]
+  fn test_name_and_version_parsing_git_hash_version() {
+    let path = PathBuf::from(
+      "/nix/store/0123456789abcdefghijklmnopqrstuv-helix-tree-sitter-pod-\
+       cd1931314beafeebc957964c65802961e283411e",
+    );
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
+    let (name, version) = store_path
+      .parse_name_and_version()
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
+    assert_eq!(name, "helix-tree-sitter-pod");
+    assert_eq!(version, Some("cd1931314beafeebc957964c65802961e283411e"));
+  }
+
   #[test]
   fn test_name_and_version_parsing_invalid_prefix() {
     let path =
