@@ -65,8 +65,8 @@ fn render_package_diffs(
   diffs.sort_by(|a, b| {
     status_group(a.status)
       .cmp(&status_group(b.status))
-      .then_with(|| a.status.cmp(&b.status))
       .then_with(|| a.name.cmp(&b.name))
+      .then_with(|| a.status.cmp(&b.status))
   });
 
   render_diffs(writer, &diffs)
@@ -492,6 +492,39 @@ mod tests {
   fn amount(amount: usize) -> NonZeroUsize {
     NonZeroUsize::new(amount)
       .unwrap_or_else(|| panic!("test version amount must be nonzero"))
+  }
+
+  fn package_diff(name: &str, status: DiffStatus) -> PackageDiff {
+    PackageDiff {
+      name: name.to_owned(),
+      versions: vec![VersionDiff::Changed {
+        old: VersionAmount::new("1.0.0", amount(1)),
+        new: VersionAmount::new("2.0.0", amount(1)),
+      }],
+      status,
+      selection: DerivationSelectionStatus::Unselected,
+      has_omitted_versions: false,
+    }
+  }
+
+  #[test]
+  fn render_package_diffs_sorts_alphabetically_within_status_group() {
+    yansi::disable();
+
+    let diffs = [
+      package_diff("zeta", DiffStatus::Changed),
+      package_diff("alpha", DiffStatus::Upgraded),
+      package_diff("mango", DiffStatus::Downgraded),
+    ];
+    let mut output = String::new();
+
+    render_package_diffs(&mut output, &diffs).unwrap();
+
+    let alpha = output.find("[U.] alpha").unwrap();
+    let mango = output.find("[D.] mango").unwrap();
+    let zeta = output.find("[C.] zeta").unwrap();
+    assert!(alpha < mango);
+    assert!(mango < zeta);
   }
 
   #[test]
