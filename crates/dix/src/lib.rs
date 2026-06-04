@@ -90,6 +90,7 @@ impl StorePath {
       bail!("path '{path}' does not match expected Nix store format");
     }
 
+    let name = strip_derivation_suffix(name);
     let (name, version) = split_name_and_version(name);
 
     tracing::trace!(name = name, version = ?version, "parsed name and version from path");
@@ -111,6 +112,10 @@ fn split_name_and_version(name: &str) -> (&str, Option<&str>) {
   }
 
   (name, None)
+}
+
+fn strip_derivation_suffix(name: &str) -> &str {
+  name.strip_suffix(".drv").unwrap_or(name)
 }
 
 fn is_version_suffix(suffix: &str) -> bool {
@@ -251,6 +256,50 @@ mod tests {
       .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
     assert_eq!(name, "helix-tree-sitter-pod");
     assert_eq!(version, Some("cd1931314beafeebc957964c65802961e283411e"));
+  }
+
+  #[test]
+  fn test_name_and_version_parsing_derivation_path() {
+    let path =
+      PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0.drv");
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
+    let (name, version) = store_path
+      .parse_name_and_version()
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
+
+    assert_eq!(name, "foo");
+    assert_eq!(version, Some("1.0"));
+  }
+
+  #[test]
+  fn test_name_and_version_parsing_derivation_patch() {
+    let path = PathBuf::from(
+      "/nix/store/0123456789abcdefghijklmnopqrstuv-CVE-2026-3184.patch.drv",
+    );
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
+    let (name, version) = store_path
+      .parse_name_and_version()
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
+
+    assert_eq!(name, "CVE");
+    assert_eq!(version, Some("2026-3184.patch"));
+  }
+
+  #[test]
+  fn test_name_and_version_parsing_derivation_without_version() {
+    let path = PathBuf::from(
+      "/nix/store/0123456789abcdefghijklmnopqrstuv-unit-modprobe-.service.drv",
+    );
+    let store_path = StorePath::try_from(path)
+      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
+    let (name, version) = store_path
+      .parse_name_and_version()
+      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
+
+    assert_eq!(name, "unit-modprobe-.service");
+    assert_eq!(version, None);
   }
 
   #[test]
