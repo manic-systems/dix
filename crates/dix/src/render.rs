@@ -294,11 +294,11 @@ fn fmt_version_diffs(
     }
   }
   if has_omitted_versions {
-    let others_str = "<others>".blue().italic().to_string();
+    let unchanged_str = "<unchanged>".blue().italic().to_string();
     append_sep(&mut old_acc, &mut old_wrote)?;
     append_sep(&mut new_acc, &mut new_wrote)?;
-    write!(old_acc, "{others_str}")?;
-    write!(new_acc, "{others_str}")?;
+    write!(old_acc, "{unchanged_str}")?;
+    write!(new_acc, "{unchanged_str}")?;
   }
 
   Ok((old_acc, new_acc))
