@@ -20,6 +20,9 @@ This is a changelog of the `dix` repository. It follows the
   package/version data without querying the Nix store.
 - Added root `dix` re-exports for the main diff model types: `DiffStatus`,
   `Version`, `VersionAmount`, and `VersionDiff`.
+- Added exact closure path statistics to reports. Human output now shows old
+  and new closure path counts plus exact added and removed store path counts,
+  and JSON output includes the same data in the `paths` object.
 
 ### Changed
 
@@ -33,14 +36,20 @@ This is a changelog of the `dix` repository. It follows the
   instead of storing counts on `Version`.
 - Changed report querying from `DiffReport::query(...)` to the
   `query_diff_report(...)` free function.
+- Changed `DiffReport` and `PathStats` to expose read-only accessor methods
+  instead of public fields.
 - Changed JSON output. Diff entries now contain tagged `versions` events and
-  `has_omitted_versions` instead of `old`, `new`, and `has_common_versions`.
+  `has_omitted_versions` instead of `old`, `new`, and `has_common_versions`,
+  and reports include exact closure path statistics in `paths`.
 
 ### Removed
 
 - Removed the old `dix::diff` and `dix::version` module paths.
 - Removed `generate_diffs_from_paths(...)` and `match_version_lists(...)` from
   the `dix` public API.
+- Removed the public `DiffReport::between(...)` constructor. Store-backed
+  reports should be built with `query_diff_report(...)`; pure package/version
+  diffs should use `dix-diff`.
 - Removed the `Change` enum.
 - Removed `Version.amount`.
 - Removed direct serde serialization of the public diff model types.
@@ -60,5 +69,12 @@ This is a changelog of the `dix` repository. It follows the
   `VersionDiff::AmountChanged` instead.
 - Rust users calling `DiffReport::query(...)` must call `query_diff_report(...)`
   instead.
+- Rust users calling `DiffReport::between(...)` must use
+  `query_diff_report(...)` for store-backed reports or `dix-diff` for pure
+  package/version diffs.
+- Rust users reading `DiffReport` or `PathStats` fields directly must use the
+  new accessor methods instead. Direct construction of `DiffReport` is no
+  longer supported.
 - JSON consumers must update to the new `--output json` schema. The old `old`,
-  `new`, and `has_common_versions` fields are no longer emitted.
+  `new`, and `has_common_versions` fields are no longer emitted, and exact
+  closure path statistics are emitted in the new `paths` object.
