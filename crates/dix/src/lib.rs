@@ -28,6 +28,7 @@ pub use report::{
   DerivationSelectionStatus,
   DiffReport,
   PackageDiff,
+  PackageSizeDelta,
   PathStats,
   query_diff_report,
 };

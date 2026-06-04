@@ -23,6 +23,9 @@ This is a changelog of the `dix` repository. It follows the
 - Added exact closure path statistics to reports. Human output now shows old
   and new closure path counts plus exact added and removed store path counts,
   and JSON output includes the same data in the `paths` object.
+- Added package size deltas to reports. Human output shows significant
+  per-package NAR size changes, and JSON diff entries include old, new, and
+  delta size fields in bytes.
 
 ### Changed
 
@@ -78,6 +81,10 @@ This is a changelog of the `dix` repository. It follows the
 - Rust users reading `DiffReport` or `PathStats` fields directly must use the
   new accessor methods instead. Direct construction of `DiffReport` is no
   longer supported.
+- Rust users implementing `dix::store::StoreBackend` must implement
+  `query_closure_path_info(...)`. The default `query_closure_size(...)`
+  implementation now derives aggregate closure size from that path info.
 - JSON consumers must update to the new `--output json` schema. The old `old`,
   `new`, and `has_common_versions` fields are no longer emitted, and exact
-  closure path statistics are emitted in the new `paths` object.
+  closure path statistics are emitted in the new `paths` object. Diff entries
+  also include `size_old`, `size_new`, and `size_delta` fields.

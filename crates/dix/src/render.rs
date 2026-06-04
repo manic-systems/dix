@@ -24,6 +24,7 @@ use crate::{
   DiffReport,
   DiffStatus,
   PackageDiff,
+  PackageSizeDelta,
   PathStats,
   Version,
   VersionAmount,
@@ -118,10 +119,30 @@ fn render_diffs(
     } else {
       ""
     };
-    writeln!(writer, "{old_str}{arrow}{new_str}")?;
+    let size_delta = fmt_package_size_delta(diff.size);
+    if old_str.is_empty() && new_str.is_empty() {
+      writeln!(writer, "{size_delta}")?;
+    } else if size_delta.is_empty() {
+      writeln!(writer, "{old_str}{arrow}{new_str}")?;
+    } else {
+      writeln!(writer, "{old_str}{arrow}{new_str}, {size_delta}")?;
+    }
   }
 
   Ok(diffs.len())
+}
+
+fn fmt_package_size_delta(size: PackageSizeDelta) -> String {
+  if !size.is_significant() {
+    return String::new();
+  }
+
+  let delta = size.delta();
+  if delta.bytes() > 0 {
+    format!("+{delta}").bright_cyan().to_string()
+  } else {
+    delta.magenta().to_string()
+  }
 }
 
 fn write_size_diff(
@@ -504,6 +525,7 @@ mod tests {
       status,
       selection: DerivationSelectionStatus::Unselected,
       has_omitted_versions: false,
+      size: PackageSizeDelta::new(Size::from_bytes(0), Size::from_bytes(0)),
     }
   }
 
@@ -525,6 +547,47 @@ mod tests {
     let zeta = output.find("[C.] zeta").unwrap();
     assert!(alpha < mango);
     assert!(mango < zeta);
+  }
+
+  #[test]
+  fn render_package_diffs_formats_package_size_delta_suffixes() {
+    yansi::disable();
+
+    let diffs = [
+      PackageDiff {
+        name:                 "linux-firmware".to_owned(),
+        versions:             vec![VersionDiff::Changed {
+          old: VersionAmount::new("20260221", amount(1)),
+          new: VersionAmount::new("20260309", amount(1)),
+        }],
+        status:               DiffStatus::Upgraded,
+        selection:            DerivationSelectionStatus::Unselected,
+        has_omitted_versions: false,
+        size:                 PackageSizeDelta::new(
+          Size::from_bytes(100),
+          Size::from_bytes(10_000),
+        ),
+      },
+      PackageDiff {
+        name:                 "source".to_owned(),
+        versions:             Vec::new(),
+        status:               DiffStatus::Changed,
+        selection:            DerivationSelectionStatus::Unselected,
+        has_omitted_versions: false,
+        size:                 PackageSizeDelta::new(
+          Size::from_bytes(10_000),
+          Size::from_bytes(100),
+        ),
+      },
+    ];
+    let mut output = String::new();
+
+    render_package_diffs(&mut output, &diffs).unwrap();
+
+    assert!(
+      output.contains("[U.] linux-firmware 20260221 -> 20260309, +9.67 KiB")
+    );
+    assert!(output.contains("[C.] source         -9.67 KiB"));
   }
 
   #[test]

@@ -25,7 +25,10 @@ use size::Size;
 
 use crate::{
   StorePath,
-  store::StoreBackend,
+  store::{
+    StoreBackend,
+    StorePathInfo,
+  },
 };
 
 #[derive(Debug)]
@@ -121,6 +124,38 @@ fn command_output(cmd_store: &str, args: &[&str]) -> std::io::Result<Output> {
   Command::new(cmd_store).args(args).output()
 }
 
+fn parse_path_info_size_output(output: &Output) -> Result<Vec<StorePathInfo>> {
+  if !output.status.success() {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    bail!(
+      "nix command exited with non-zero status {status}: {err}",
+      status = output.status,
+      err = stderr.trim()
+    );
+  }
+
+  let text = str::from_utf8(&output.stdout)?;
+  let mut infos = Vec::new();
+  for line in text.lines() {
+    let mut columns = line.split_whitespace();
+    let path = columns
+      .next()
+      .ok_or_else(|| eyre!("missing path in nix path-info output line"))?;
+    let bytes = columns
+      .next()
+      .ok_or_else(|| eyre!("missing NAR size in nix path-info output line"))?
+      .parse::<i64>()
+      .wrap_err("failed to parse NAR size from nix path-info output")?;
+
+    infos.push(StorePathInfo::new(
+      StorePath::try_from(PathBuf::from(path))?,
+      Size::from_bytes(bytes),
+    ));
+  }
+
+  Ok(infos)
+}
+
 impl StoreBackend for CommandBackend {
   /// Does nothing (we spawn a new process everytime).
   fn connect(&mut self) -> Result<()> {
@@ -138,32 +173,6 @@ impl StoreBackend for CommandBackend {
     Ok(())
   }
 
-  fn query_closure_size(&self, path: &Path) -> Result<Size> {
-    let sw_path = path.join("sw");
-    let sw_path = sw_path.to_string_lossy();
-    let cmd_res =
-      command_output(&self.nix_cmd, &["path-info", "--closure-size", &sw_path])
-        .wrap_err("Encountered error while executing nix command")?;
-
-    if !cmd_res.status.success() {
-      let stderr = String::from_utf8_lossy(&cmd_res.stderr);
-      bail!(
-        "nix command exited with non-zero status {status}: {err}",
-        status = cmd_res.status,
-        err = stderr.trim()
-      );
-    }
-    let text = str::from_utf8(&cmd_res.stdout)?;
-
-    if let Some(bytes_text) = text.split_whitespace().last()
-      && let Ok(bytes) = bytes_text.parse::<u64>()
-    {
-      Ok(Size::from_bytes(bytes))
-    } else {
-      bail!("Unable to parse closure size from nix output")
-    }
-  }
-
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     nix_command_query(&self.nix_cmd, &[
       "--query",
@@ -178,6 +187,19 @@ impl StoreBackend for CommandBackend {
       "--requisites",
       &*path.to_string_lossy(),
     ])
+  }
+
+  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
+    let path = path.to_string_lossy();
+    let output = command_output(&self.nix_cmd, &[
+      "path-info",
+      "--recursive",
+      "--size",
+      &path,
+    ])
+    .wrap_err("Encountered error while executing nix command")?;
+
+    parse_path_info_size_output(&output)
   }
 }
 
@@ -242,8 +264,6 @@ mod tests {
 /nix/store/0m7l4qv84417cy2m8jlw7yxyn12ralyq-twolame-2017-09-27
 /nix/store/0m8p1yj6k5fk7fpvj37krhbsnry8v70r-pmx-3.00-tex";
 
-  const FAKE_CLOSURE_SIZE: i64 = 123_456_789;
-
   const FAKE_STORE_PATH: &str =
     "/nix/store/h9lc1dpi14z7is86ffhl3ld569138595-audit-tmpdir.sh";
 
@@ -253,14 +273,19 @@ mod tests {
     let mock_command_content = format!(
       r#"#!/usr/bin/env sh
       for arg in "$@"; do
-        if [ "$arg" = "--closure-size" ]; then
-          echo "{closure_size}"
+        if [ "$arg" = "--size" ]; then
+          {size_echos}
           exit 0
         fi
       done
     {echos}
     "#,
-      closure_size = FAKE_CLOSURE_SIZE,
+      size_echos = FAKE_PATHS
+        .lines()
+        .enumerate()
+        .map(|(index, path)| format!("echo \"{path} {}\"", index + 1))
+        .collect::<Vec<String>>()
+        .join("\n"),
       echos = FAKE_PATHS
         .lines()
         .map(|path| format!("echo \"{path}\""))
@@ -317,7 +342,9 @@ mod tests {
     let size = backend
       .query_closure_size(Path::new(FAKE_STORE_PATH))
       .unwrap();
-    assert_eq!(size, Size::from_bytes(FAKE_CLOSURE_SIZE));
+    let path_count = i64::try_from(FAKE_PATHS.lines().count())
+      .unwrap_or_else(|err| panic!("path count must fit i64: {err}"));
+    assert_eq!(size, Size::from_bytes(path_count * (path_count + 1) / 2));
   }
 
   #[test]
@@ -350,6 +377,16 @@ mod tests {
     expected.sort();
 
     assert_eq!(references, expected);
+  }
+
+  #[test]
+  fn test_query_closure_path_info() {
+    let (_tmpdir, backend) = setup_fake_nix_command_backend();
+    let info = backend
+      .query_closure_path_info(Path::new(FAKE_STORE_PATH))
+      .unwrap();
+    assert_eq!(info.len(), FAKE_PATHS.lines().count());
+    assert_eq!(info[0].nar_size(), Size::from_bytes(1));
   }
 
   #[test]

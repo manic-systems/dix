@@ -89,10 +89,14 @@ struct JsonDiff<'a> {
   status:               JsonDiffStatus,
   selection:            JsonDerivationSelectionStatus,
   has_omitted_versions: bool,
+  size_old:             i64,
+  size_new:             i64,
+  size_delta:           i64,
 }
 
 impl<'a> From<&'a PackageDiff> for JsonDiff<'a> {
   fn from(diff: &'a PackageDiff) -> Self {
+    let size_delta = diff.size.delta();
     Self {
       name:                 diff.name.as_str(),
       versions:             diff
@@ -103,6 +107,9 @@ impl<'a> From<&'a PackageDiff> for JsonDiff<'a> {
       status:               JsonDiffStatus::from(diff.status),
       selection:            JsonDerivationSelectionStatus::from(diff.selection),
       has_omitted_versions: diff.has_omitted_versions,
+      size_old:             diff.size.old_size().bytes(),
+      size_new:             diff.size.new_size().bytes(),
+      size_delta:           size_delta.bytes(),
     }
   }
 }
@@ -242,6 +249,7 @@ mod tests {
     DerivationSelectionStatus,
     DiffReport,
     PackageDiff,
+    PackageSizeDelta,
   };
 
   fn amount(amount: usize) -> NonZeroUsize {
@@ -251,7 +259,7 @@ mod tests {
 
   #[test]
   fn test_basic_json_output_format() {
-    let expected_output = r#"{"diffs":[{"name":"nixos","versions":[{"kind":"changed","old":{"name":"25.11-system-path","amount":1},"new":{"name":"25.12-system-path","amount":1}},{"kind":"amount_changed","version":{"name":"25.12-system"},"old_amount":1,"new_amount":2}],"status":"Changed","selection":"Unselected","has_omitted_versions":false}],"paths":{"old":7529,"new":7536,"added":5054,"removed":5047},"size_old":115001000,"size_new":115001000}"#;
+    let expected_output = r#"{"diffs":[{"name":"nixos","versions":[{"kind":"changed","old":{"name":"25.11-system-path","amount":1},"new":{"name":"25.12-system-path","amount":1}},{"kind":"amount_changed","version":{"name":"25.12-system"},"old_amount":1,"new_amount":2}],"status":"Changed","selection":"Unselected","has_omitted_versions":false,"size_old":1000,"size_new":2500,"size_delta":1500}],"paths":{"old":7529,"new":7536,"added":5054,"removed":5047},"size_old":115001000,"size_new":115001000}"#;
 
     let report = DiffReport::new_for_test(
       vec![PackageDiff {
@@ -270,6 +278,10 @@ mod tests {
         status:               DiffStatus::Changed,
         selection:            DerivationSelectionStatus::Unselected,
         has_omitted_versions: false,
+        size:                 PackageSizeDelta::new(
+          Size::from_bytes(1_000),
+          Size::from_bytes(2_500),
+        ),
       }],
       PathStats::new_for_test(7529, 7536, 5054, 5047),
       Size::from_bytes(115_001_000),

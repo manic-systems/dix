@@ -25,6 +25,7 @@ use crate::{
   path_to_canonical_string,
   store::{
     StoreBackend,
+    StorePathInfo,
     queries,
   },
 };
@@ -75,10 +76,6 @@ impl StoreBackend for DbConnection {
     close_inner_connection(&self.path, &mut self.conn)
   }
 
-  fn query_closure_size(&self, path: &Path) -> Result<size::Size> {
-    query_closure_size(self.get_inner()?, path)
-  }
-
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     query_store_paths(
       self.get_inner()?,
@@ -89,6 +86,10 @@ impl StoreBackend for DbConnection {
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
     query_store_paths(self.get_inner()?, queries::QUERY_DEPENDENTS, path)
+  }
+
+  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
+    query_store_path_info(self.get_inner()?, path)
   }
 }
 
@@ -157,17 +158,6 @@ fn close_inner_connection(
   })
 }
 
-fn query_closure_size(conn: &Connection, path: &Path) -> Result<Size> {
-  tracing::trace!(path = %path.display(), "querying closure size");
-  let path = path_to_canonical_string(path)?;
-
-  let closure_size = conn
-    .prepare_cached(queries::QUERY_CLOSURE_SIZE)?
-    .query_row([path], |row| Ok(Size::from_bytes(row.get::<_, i64>(0)?)))?;
-
-  Ok(closure_size)
-}
-
 fn query_store_paths(
   conn: &Connection,
   query: &str,
@@ -183,4 +173,26 @@ fn query_store_paths(
   }
 
   Ok(paths)
+}
+
+fn query_store_path_info(
+  conn: &Connection,
+  path: &Path,
+) -> Result<Vec<StorePathInfo>> {
+  let path = path_to_canonical_string(path)?;
+  let mut query = conn.prepare_cached(queries::QUERY_CLOSURE_PATH_INFO)?;
+  let rows = query.query_map([path], |row| {
+    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+  })?;
+
+  let mut infos = Vec::new();
+  for row in rows {
+    let (path, nar_size) = row?;
+    infos.push(StorePathInfo::new(
+      StorePath::try_from(PathBuf::from(path))?,
+      Size::from_bytes(nar_size),
+    ));
+  }
+
+  Ok(infos)
 }
