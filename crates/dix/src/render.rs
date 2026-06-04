@@ -537,6 +537,6 @@ mod tests {
     )
     .unwrap();
 
-    assert_eq!(output, "PATHS: 7529 -> 7536 paths (+5054, -5047)\n");
+    assert_eq!(output, "PATHS: 7529 -> 7536 (+5054, -5047)\n");
   }
 }
