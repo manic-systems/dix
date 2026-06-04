@@ -139,12 +139,11 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_closure_size(&self, path: &Path) -> Result<Size> {
-    let cmd_res = Command::new(&self.nix_cmd)
-      .arg("path-info")
-      .arg("--closure-size")
-      .arg(path.join("sw"))
-      .output()
-      .wrap_err("Encountered error while executing nix command")?;
+    let sw_path = path.join("sw");
+    let sw_path = sw_path.to_string_lossy();
+    let cmd_res =
+      command_output(&self.nix_cmd, &["path-info", "--closure-size", &sw_path])
+        .wrap_err("Encountered error while executing nix command")?;
 
     if !cmd_res.status.success() {
       let stderr = String::from_utf8_lossy(&cmd_res.stderr);
