@@ -19,6 +19,7 @@ use crate::{
     Package,
     PackageSnapshot,
   },
+  version::VersionChangeOrdering,
 };
 
 #[must_use]
@@ -247,10 +248,17 @@ fn determine_change_status(
       VersionDiff::Removed(_) => saw_downgrade = true,
       VersionDiff::Added(_) => saw_upgrade = true,
       VersionDiff::Changed { old, new } => {
-        match old.version.cmp(&new.version) {
-          cmp::Ordering::Less => saw_upgrade = true,
-          cmp::Ordering::Greater => saw_downgrade = true,
-          cmp::Ordering::Equal => {},
+        match old.version.change_ordering(&new.version) {
+          VersionChangeOrdering::Ordered(cmp::Ordering::Less) => {
+            saw_upgrade = true;
+          },
+          VersionChangeOrdering::Ordered(cmp::Ordering::Greater) => {
+            saw_downgrade = true;
+          },
+          VersionChangeOrdering::Ordered(cmp::Ordering::Equal)
+          | VersionChangeOrdering::Unordered => {
+            saw_changed = true;
+          },
         }
       },
       VersionDiff::AmountChanged { .. } => {
@@ -454,6 +462,26 @@ mod tests {
       old: version_amount("1.0.0", 1),
       new: version_amount("2.0.0", 1),
     }]);
+  }
+
+  #[test]
+  fn generate_diffs_reports_git_hash_only_change_as_changed() {
+    let diff = diff_for("sunsetr", &["0.11.1-946aa34"], &["0.11.1-3564204"]);
+
+    assert_eq!(diff.status, DiffStatus::Changed);
+    assert_eq!(diff.versions, vec![VersionDiff::Changed {
+      old: version_amount("0.11.1-946aa34", 1),
+      new: version_amount("0.11.1-3564204", 1),
+    }]);
+  }
+
+  #[test]
+  fn generate_diffs_uses_dated_component_before_git_hash_for_upgrade() {
+    let diff = diff_for("yazi", &["25.05.31pre20250531_946aa34"], &[
+      "25.05.31pre20250601_3564204",
+    ]);
+
+    assert_eq!(diff.status, DiffStatus::Upgraded);
   }
 
   #[test]
