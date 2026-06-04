@@ -24,6 +24,7 @@ use crate::{
   DiffReport,
   DiffStatus,
   PackageDiff,
+  PathStats,
   Version,
   VersionAmount,
   VersionDiff,
@@ -44,13 +45,14 @@ pub fn write_diff_report(
 ) -> Result<usize, fmt::Error> {
   writeln!(writer)?;
 
-  let wrote = render_package_diffs(writer, &report.diffs)?;
+  let wrote = render_package_diffs(writer, report.diffs())?;
 
   if wrote > 0 {
     writeln!(writer)?;
   }
 
-  write_size_diff(writer, report.size_old, report.size_new)?;
+  write_path_stats(writer, report.path_stats())?;
+  write_size_diff(writer, report.size_old(), report.size_new())?;
 
   Ok(wrote)
 }
@@ -146,6 +148,24 @@ fn write_size_diff(
       Ordering::Equal => size_diff.resetting(),
       Ordering::Greater => size_diff.red(),
     },
+  )
+}
+
+fn write_path_stats(
+  writer: &mut impl fmt::Write,
+  stats: PathStats,
+) -> fmt::Result {
+  let added = format!("+{}", stats.added_count());
+  let removed = format!("-{}", stats.removed_count());
+
+  writeln!(
+    writer,
+    "{header}: {old} -> {new} ({added}, {removed})",
+    header = "PATHS".bold(),
+    old = stats.old_count().red(),
+    new = stats.new_count().green(),
+    added = Painted::new(added.as_str()).green(),
+    removed = Painted::new(removed.as_str()).red(),
   )
 }
 
@@ -503,5 +523,20 @@ mod tests {
 
     assert_eq!(old, "1.0.0");
     assert_eq!(new, "1.0.0 ×2");
+  }
+
+  #[test]
+  fn write_path_stats_formats_exact_path_changes() {
+    yansi::disable();
+
+    let mut output = String::new();
+
+    write_path_stats(
+      &mut output,
+      PathStats::new_for_test(7529, 7536, 5054, 5047),
+    )
+    .unwrap();
+
+    assert_eq!(output, "PATHS: 7529 -> 7536 paths (+5054, -5047)\n");
   }
 }

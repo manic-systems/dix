@@ -14,6 +14,7 @@ use crate::{
   DiffReport,
   DiffStatus,
   PackageDiff,
+  PathStats,
   Version,
   VersionAmount,
   VersionDiff,
@@ -43,6 +44,8 @@ fn generate_diff(out: &mut dyn Write, report: &DiffReport) -> Result<()> {
 pub struct JsonReport<'a> {
   /// package changes
   diffs:    Vec<JsonDiff<'a>>,
+  /// exact closure path counts
+  paths:    JsonPathStats,
   /// old closure size (in bytes)
   size_old: i64,
   /// new closure size (in bytes)
@@ -52,9 +55,29 @@ pub struct JsonReport<'a> {
 impl<'a> From<&'a DiffReport> for JsonReport<'a> {
   fn from(report: &'a DiffReport) -> Self {
     Self {
-      diffs:    report.diffs.iter().map(JsonDiff::from).collect(),
-      size_old: report.size_old.bytes(),
-      size_new: report.size_new.bytes(),
+      diffs:    report.diffs().iter().map(JsonDiff::from).collect(),
+      paths:    JsonPathStats::from(report.path_stats()),
+      size_old: report.size_old().bytes(),
+      size_new: report.size_new().bytes(),
+    }
+  }
+}
+
+#[derive(Serialize)]
+struct JsonPathStats {
+  old:     usize,
+  new:     usize,
+  added:   usize,
+  removed: usize,
+}
+
+impl From<PathStats> for JsonPathStats {
+  fn from(stats: PathStats) -> Self {
+    Self {
+      old:     stats.old_count(),
+      new:     stats.new_count(),
+      added:   stats.added_count(),
+      removed: stats.removed_count(),
     }
   }
 }
@@ -228,10 +251,10 @@ mod tests {
 
   #[test]
   fn test_basic_json_output_format() {
-    let expected_output = r#"{"diffs":[{"name":"nixos","versions":[{"kind":"changed","old":{"name":"25.11-system-path","amount":1},"new":{"name":"25.12-system-path","amount":1}},{"kind":"amount_changed","version":{"name":"25.12-system"},"old_amount":1,"new_amount":2}],"status":"Changed","selection":"Unselected","has_omitted_versions":false}],"size_old":115001000,"size_new":115001000}"#;
+    let expected_output = r#"{"diffs":[{"name":"nixos","versions":[{"kind":"changed","old":{"name":"25.11-system-path","amount":1},"new":{"name":"25.12-system-path","amount":1}},{"kind":"amount_changed","version":{"name":"25.12-system"},"old_amount":1,"new_amount":2}],"status":"Changed","selection":"Unselected","has_omitted_versions":false}],"paths":{"old":7529,"new":7536,"added":5054,"removed":5047},"size_old":115001000,"size_new":115001000}"#;
 
-    let report = DiffReport {
-      diffs:    vec![PackageDiff {
+    let report = DiffReport::new_for_test(
+      vec![PackageDiff {
         name:                 "nixos".to_owned(),
         versions:             vec![
           VersionDiff::Changed {
@@ -248,9 +271,10 @@ mod tests {
         selection:            DerivationSelectionStatus::Unselected,
         has_omitted_versions: false,
       }],
-      size_old: Size::from_bytes(115_001_000),
-      size_new: Size::from_bytes(115_001_000),
-    };
+      PathStats::new_for_test(7529, 7536, 5054, 5047),
+      Size::from_bytes(115_001_000),
+      Size::from_bytes(115_001_000),
+    );
 
     let mut actual_output = Vec::new();
     generate_diff(&mut actual_output, &report).unwrap();

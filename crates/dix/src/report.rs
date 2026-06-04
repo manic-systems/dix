@@ -33,9 +33,18 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DiffReport {
-  pub diffs:    Vec<PackageDiff>,
-  pub size_old: Size,
-  pub size_new: Size,
+  diffs:      Vec<PackageDiff>,
+  path_stats: PathStats,
+  size_old:   Size,
+  size_new:   Size,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PathStats {
+  old:     usize,
+  new:     usize,
+  added:   usize,
+  removed: usize,
 }
 
 #[derive(Debug)]
@@ -98,21 +107,114 @@ impl DerivationSelectionStatus {
 
 impl DiffReport {
   #[must_use]
-  pub fn between(
-    old: &PackageSnapshot,
-    new: &PackageSnapshot,
-    selected_old: &HashSet<String>,
-    selected_new: &HashSet<String>,
+  pub fn diffs(&self) -> &[PackageDiff] {
+    &self.diffs
+  }
+
+  #[must_use]
+  pub const fn path_stats(&self) -> PathStats {
+    self.path_stats
+  }
+
+  #[must_use]
+  pub const fn size_old(&self) -> Size {
+    self.size_old
+  }
+
+  #[must_use]
+  pub const fn size_new(&self) -> Size {
+    self.size_new
+  }
+
+  #[cfg(test)]
+  pub(crate) const fn new_for_test(
+    diffs: Vec<PackageDiff>,
+    path_stats: PathStats,
     size_old: Size,
     size_new: Size,
   ) -> Self {
     Self {
-      diffs: diff_snapshots(old, new)
-        .into_iter()
-        .map(|diff| PackageDiff::from_engine(diff, selected_old, selected_new))
-        .collect(),
+      diffs,
+      path_stats,
       size_old,
       size_new,
+    }
+  }
+
+  #[must_use]
+  fn from_queried_snapshots(
+    snapshots: QueriedSnapshots,
+    size_old: Size,
+    size_new: Size,
+  ) -> Self {
+    let QueriedSnapshots {
+      old,
+      new,
+      path_stats,
+    } = snapshots;
+    let (old_snapshot, selected_old) = old.into_snapshot_parts();
+    let (new_snapshot, selected_new) = new.into_snapshot_parts();
+
+    Self {
+      diffs: diff_snapshots(&old_snapshot, &new_snapshot)
+        .into_iter()
+        .map(|diff| {
+          PackageDiff::from_engine(diff, &selected_old, &selected_new)
+        })
+        .collect(),
+      path_stats,
+      size_old,
+      size_new,
+    }
+  }
+}
+
+impl PathStats {
+  #[must_use]
+  pub const fn old_count(self) -> usize {
+    self.old
+  }
+
+  #[must_use]
+  pub const fn new_count(self) -> usize {
+    self.new
+  }
+
+  #[must_use]
+  pub const fn added_count(self) -> usize {
+    self.added
+  }
+
+  #[must_use]
+  pub const fn removed_count(self) -> usize {
+    self.removed
+  }
+
+  #[cfg(test)]
+  pub(crate) const fn new_for_test(
+    old: usize,
+    new: usize,
+    added: usize,
+    removed: usize,
+  ) -> Self {
+    Self {
+      old,
+      new,
+      added,
+      removed,
+    }
+  }
+
+  #[must_use]
+  fn between(old: &[StorePath], new: &[StorePath]) -> Self {
+    let old_paths = old.iter().collect::<HashSet<_>>();
+    let new_paths = new.iter().collect::<HashSet<_>>();
+
+    Self {
+      old:     old_paths.len(),
+      new:     new_paths.len(),
+      added:   new_paths.difference(&old_paths).count(),
+      removed: old_paths.difference(&new_paths).count(),
     }
   }
 }
@@ -120,6 +222,12 @@ impl DiffReport {
 struct SnapshotPackages {
   packages:       Vec<Package>,
   selected_names: HashSet<String>,
+}
+
+struct QueriedSnapshots {
+  old:        SnapshotPackages,
+  new:        SnapshotPackages,
+  path_stats: PathStats,
 }
 
 impl SnapshotPackages {
@@ -180,35 +288,37 @@ pub fn query_diff_report(
     path_new.to_path_buf(),
     force_correctness,
   );
-  let packages = CombinedStoreBackend::query_with_correctness(
+  let snapshots = CombinedStoreBackend::query_with_correctness(
     force_correctness,
-    |backend| query_snapshot_packages(backend, path_old, path_new),
+    |backend| query_report_snapshots(backend, path_old, path_new),
   );
   let sizes = join_closure_sizes(size_handle);
 
-  let (old_packages, new_packages) = packages?;
+  let snapshots = snapshots?;
   let (size_old, size_new) = sizes?;
-  let (old_snapshot, selected_old) = old_packages.into_snapshot_parts();
-  let (new_snapshot, selected_new) = new_packages.into_snapshot_parts();
-  let report = DiffReport::between(
-    &old_snapshot,
-    &new_snapshot,
-    &selected_old,
-    &selected_new,
-    size_old,
-    size_new,
-  );
+  let report =
+    DiffReport::from_queried_snapshots(snapshots, size_old, size_new);
+  let path_stats = report.path_stats();
 
-  tracing::info!(diff_count = report.diffs.len(), size_old = %report.size_old, size_new = %report.size_new, "diff report complete");
+  tracing::info!(
+    diff_count = report.diffs().len(),
+    paths_old = path_stats.old_count(),
+    paths_new = path_stats.new_count(),
+    paths_added = path_stats.added_count(),
+    paths_removed = path_stats.removed_count(),
+    size_old = %report.size_old(),
+    size_new = %report.size_new(),
+    "diff report complete"
+  );
 
   Ok(report)
 }
 
-fn query_snapshot_packages(
+fn query_report_snapshots(
   backend: &impl StoreBackend,
   path_old: &Path,
   path_new: &Path,
-) -> Result<(SnapshotPackages, SnapshotPackages)> {
+) -> Result<QueriedSnapshots> {
   tracing::debug!("querying dependencies for old path");
   let paths_old = backend.query_dependents(path_old).with_context(|| {
     format!("failed to query dependencies of '{}'", path_old.display())
@@ -239,8 +349,10 @@ fn query_snapshot_packages(
       )
     })?;
 
-  Ok((
-    SnapshotPackages::from_store_paths(
+  let path_stats = PathStats::between(&paths_old, &paths_new);
+
+  Ok(QueriedSnapshots {
+    old: SnapshotPackages::from_store_paths(
       paths_old,
       system_derivations_old,
       SnapshotContext {
@@ -248,7 +360,7 @@ fn query_snapshot_packages(
         selected:     "old system",
       },
     ),
-    SnapshotPackages::from_store_paths(
+    new: SnapshotPackages::from_store_paths(
       paths_new,
       system_derivations_new,
       SnapshotContext {
@@ -256,7 +368,8 @@ fn query_snapshot_packages(
         selected:     "new system",
       },
     ),
-  ))
+    path_stats,
+  })
 }
 
 fn package_from_store_path(path: &StorePath, context: &str) -> Option<Package> {
@@ -312,4 +425,34 @@ fn join_closure_sizes(
     tracing::error!("closure size thread panicked");
     eyre!("failed to get closure size due to thread error")
   })?
+}
+
+#[cfg(test)]
+mod tests {
+  use std::path::PathBuf;
+
+  use super::*;
+
+  fn store_path(name: &str) -> StorePath {
+    StorePath::try_from(PathBuf::from(format!(
+      "/nix/store/0123456789abcdefghijklmnopqrstuv-{name}"
+    )))
+    .unwrap_or_else(|err| panic!("failed to create test store path: {err}"))
+  }
+
+  #[test]
+  fn path_stats_count_exact_unique_path_sets() {
+    let shared = store_path("shared-1.0");
+    let removed_a = store_path("removed-a-1.0");
+    let removed_b = store_path("removed-b-1.0");
+    let added = store_path("added-1.0");
+
+    let old = vec![shared.clone(), shared.clone(), removed_a, removed_b];
+    let new = vec![shared, added];
+
+    assert_eq!(
+      PathStats::between(&old, &new),
+      PathStats::new_for_test(3, 2, 1, 2),
+    );
+  }
 }
