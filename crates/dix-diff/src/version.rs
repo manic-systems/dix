@@ -17,6 +17,19 @@ pub struct Version {
   pub name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionChangeOrdering {
+  Ordered(cmp::Ordering),
+  Unordered,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComparedVersionComponents {
+  Ordered(cmp::Ordering),
+  Equal,
+  Unordered,
+}
+
 impl Version {
   #[must_use]
   pub fn new(version: impl Into<String>) -> Self {
@@ -35,6 +48,69 @@ impl Version {
   pub fn iter(&self) -> Pieces<'_> {
     Pieces::new(&self.name)
   }
+
+  pub(crate) fn change_ordering(&self, other: &Self) -> VersionChangeOrdering {
+    match self.compare_components_with(other, |self_comp, other_comp| {
+      if self_comp.is_git_short_hash_pair(other_comp) {
+        ComparedVersionComponents::Unordered
+      } else {
+        ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
+      }
+    }) {
+      ComparedVersionComponents::Ordered(ordering) => {
+        VersionChangeOrdering::Ordered(ordering)
+      },
+      ComparedVersionComponents::Equal => {
+        VersionChangeOrdering::Ordered(cmp::Ordering::Equal)
+      },
+      ComparedVersionComponents::Unordered => VersionChangeOrdering::Unordered,
+    }
+  }
+
+  fn compare_components_with(
+    &self,
+    other: &Self,
+    mut compare_component: impl FnMut(
+      VersionComponent<'_>,
+      VersionComponent<'_>,
+    ) -> ComparedVersionComponents,
+  ) -> ComparedVersionComponents {
+    let self_comps: Vec<_> = self.components().collect();
+    let other_comps: Vec<_> = other.components().collect();
+    let mut saw_unordered = false;
+
+    let min_len = self_comps.len().min(other_comps.len());
+
+    for i in 0..min_len {
+      let self_comp = self_comps[i];
+      let other_comp = other_comps[i];
+
+      if self_comp == other_comp {
+        continue;
+      }
+
+      match compare_component(self_comp, other_comp) {
+        ComparedVersionComponents::Equal
+        | ComparedVersionComponents::Ordered(cmp::Ordering::Equal) => {},
+        ComparedVersionComponents::Ordered(ordering) => {
+          return ComparedVersionComponents::Ordered(ordering);
+        },
+        ComparedVersionComponents::Unordered => {
+          saw_unordered = true;
+        },
+      }
+    }
+
+    let suffix_ordering =
+      compare_component_suffixes(&self_comps, &other_comps, min_len);
+    match suffix_ordering {
+      cmp::Ordering::Equal if saw_unordered => {
+        ComparedVersionComponents::Unordered
+      },
+      cmp::Ordering::Equal => ComparedVersionComponents::Equal,
+      ordering => ComparedVersionComponents::Ordered(ordering),
+    }
+  }
 }
 
 impl<T: Into<String>> From<T> for Version {
@@ -51,41 +127,37 @@ impl PartialOrd for Version {
 
 impl Ord for Version {
   fn cmp(&self, other: &Self) -> cmp::Ordering {
-    let self_comps: Vec<_> = self.components().collect();
-    let other_comps: Vec<_> = other.components().collect();
+    match self.compare_components_with(other, |self_comp, other_comp| {
+      ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
+    }) {
+      ComparedVersionComponents::Ordered(ordering) => ordering,
+      ComparedVersionComponents::Equal
+      | ComparedVersionComponents::Unordered => cmp::Ordering::Equal,
+    }
+  }
+}
 
-    let min_len = self_comps.len().min(other_comps.len());
-
-    // Compare common prefix
-    for i in 0..min_len {
-      let ord = self_comps[i].cmp(&other_comps[i]);
-      if ord != cmp::Ordering::Equal {
-        return ord;
+fn compare_component_suffixes(
+  self_comps: &[VersionComponent<'_>],
+  other_comps: &[VersionComponent<'_>],
+  prefix_len: usize,
+) -> cmp::Ordering {
+  match self_comps.len().cmp(&other_comps.len()) {
+    cmp::Ordering::Equal => cmp::Ordering::Equal,
+    cmp::Ordering::Greater => {
+      if self_comps[prefix_len..].iter().any(|c| !c.is_numeric()) {
+        cmp::Ordering::Less
+      } else {
+        cmp::Ordering::Greater
       }
-    }
-
-    // Equal so far - check for pre-release semantics
-    match self_comps.len().cmp(&other_comps.len()) {
-      cmp::Ordering::Equal => cmp::Ordering::Equal,
-      cmp::Ordering::Greater => {
-        // Self has extra components - if they're non-numeric, self is a
-        // pre-release
-        if self_comps[min_len..].iter().any(|c| !c.is_numeric()) {
-          cmp::Ordering::Less
-        } else {
-          cmp::Ordering::Greater
-        }
-      },
-      cmp::Ordering::Less => {
-        // Other has extra components - if they're non-numeric, other is a
-        // pre-release
-        if other_comps[min_len..].iter().any(|c| !c.is_numeric()) {
-          cmp::Ordering::Greater
-        } else {
-          cmp::Ordering::Less
-        }
-      },
-    }
+    },
+    cmp::Ordering::Less => {
+      if other_comps[prefix_len..].iter().any(|c| !c.is_numeric()) {
+        cmp::Ordering::Greater
+      } else {
+        cmp::Ordering::Less
+      }
+    },
   }
 }
 
@@ -180,6 +252,24 @@ impl VersionComponent<'_> {
   pub fn as_u64(&self) -> Option<u64> {
     self.is_numeric().then(|| self.0.parse().ok()).flatten()
   }
+
+  fn is_git_short_hash_pair(&self, other: Self) -> bool {
+    self.is_hex_hash_component()
+      && other.is_hex_hash_component()
+      && (self.has_ascii_hex_letter() || other.has_ascii_hex_letter())
+  }
+
+  fn is_hex_hash_component(&self) -> bool {
+    (7..=40).contains(&self.0.len())
+      && self.0.bytes().all(|b| b.is_ascii_hexdigit())
+  }
+
+  fn has_ascii_hex_letter(&self) -> bool {
+    self
+      .0
+      .bytes()
+      .any(|b| matches!(b, b'a'..=b'f' | b'A'..=b'F'))
+  }
 }
 
 impl PartialOrd for VersionComponent<'_> {
@@ -233,6 +323,7 @@ mod tests {
 
   use super::{
     Version,
+    VersionChangeOrdering,
     VersionComponent,
     VersionPiece,
   };
@@ -316,6 +407,41 @@ mod tests {
     assert!(Version::new("1.0.0-beta") > Version::new("1.0.0-alpha"));
     assert!(Version::new("1.0.0-beta.11") > Version::new("1.0.0-beta.2"));
     assert_eq!(Version::new("1.0.0"), Version::new("1.0.0"));
+  }
+
+  #[test]
+  fn change_ordering_treats_git_short_hash_pair_as_unordered() {
+    let old = Version::new("0.11.1-946aa34");
+    let new = Version::new("0.11.1-3564204");
+
+    assert_eq!(old.change_ordering(&new), VersionChangeOrdering::Unordered);
+    assert_eq!(new.change_ordering(&old), VersionChangeOrdering::Unordered);
+  }
+
+  #[test]
+  fn change_ordering_uses_non_hash_components_before_hashes() {
+    let old = Version::new("25.05.31pre20250531_946aa34");
+    let new = Version::new("25.05.31pre20250601_3564204");
+
+    assert_eq!(
+      old.change_ordering(&new),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less),
+    );
+    assert_eq!(
+      new.change_ordering(&old),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Greater),
+    );
+  }
+
+  #[test]
+  fn change_ordering_keeps_numeric_components_ordered() {
+    let old = Version::new("1.0-1234567");
+    let new = Version::new("1.0-2345678");
+
+    assert_eq!(
+      old.change_ordering(&new),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less),
+    );
   }
 
   #[test]
