@@ -58,7 +58,6 @@
 
             buildType = "release";
 
-            doCheck = false;
             strictDeps = true;
           };
         }
