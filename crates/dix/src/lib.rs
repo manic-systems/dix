@@ -46,11 +46,14 @@ impl TryFrom<PathBuf> for StorePath {
 
   fn try_from(path: PathBuf) -> Result<Self> {
     tracing::trace!(path = %path.display(), "validating store path");
-    if !(path.starts_with("/nix/store") || path.starts_with("/tmp/")) {
-      tracing::warn!(path = %path.display(), "path does not start with /nix/store or /tmp/");
+    if !(path.starts_with("/nix/store")
+      || cfg!(test) && path.starts_with("/tmp/")
+      || cfg!(test) && path.starts_with(std::env::temp_dir()))
+    {
       bail!(
-        "path {path} must start with /nix/store or /tmp/",
+        "path {path} must start with /nix/store or {temp_dir}",
         path = path.display(),
+        temp_dir = std::env::temp_dir().display(),
       );
     }
     tracing::trace!(path = %path.display(), "store path validated");
