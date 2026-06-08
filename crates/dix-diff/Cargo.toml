@@ -1,25 +1,25 @@
 [package]
-name = "dix-diff"
-version.workspace = true
-edition.workspace = true
-description = "Internal pure diff engine for dix"
-readme = "../../README.md"
-homepage.workspace = true
+name                 = "dix-diff"
+version.workspace    = true
+edition.workspace    = true
+description          = "Internal pure diff engine for dix"
+readme               = "../../README.md"
+homepage.workspace   = true
 repository.workspace = true
-license.workspace = true
-keywords.workspace = true
+license.workspace    = true
+keywords.workspace   = true
 categories.workspace = true
 
 [dependencies]
 derive_more = { workspace = true }
-itertools = { workspace = true }
+itertools   = { workspace = true }
 pathfinding = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 
 [features]
-default = []
+default = [  ]
 
 [lints]
 workspace = true
