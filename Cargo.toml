@@ -1,89 +1,89 @@
 [workspace]
+members  = [ "crates/dix", "crates/dix-diff" ]
 resolver = "3"
-members = ["crates/dix", "crates/dix-diff"]
 
 [workspace.package]
-version = "2.0.0"
-edition = "2024"
+categories   = [ "command-line-utilities" ]
+edition      = "2024"
+homepage     = "https://github.com/faukah/dix"
+keywords     = [ "nix", "nixos" ]
+license      = "GPL-3.0-only"
+repository   = "https://github.com/faukah/dix"
 rust-version = "1.95.0"
-homepage = "https://github.com/faukah/dix"
-repository = "https://github.com/faukah/dix"
-license = "GPL-3.0-only"
-keywords = ["nix", "nixos"]
-categories = ["command-line-utilities"]
+version      = "2.0.0"
 
 [workspace.dependencies]
 # Keep this exact: packaged `dix` resolves `dix-diff` from crates.io after Cargo
 # strips the local path, so release `dix-diff` before `dix`.
 dix-diff = { path = "crates/dix-diff", version = "=2.0.0" }
 
-clap = { version = "4.5.37", features = ["derive"] }
+clap                = { features = [ "derive" ], version = "4.5.37" }
 clap-verbosity-flag = "3.0.2"
-derive_more = { version = "2.0.1", features = ["full"] }
-diff = "0.1.13"
-eyre = "0.6"
-itertools = "0.14.0"
-pathfinding = "4.14.0"
-proptest = "1.6.0"
-rusqlite = { version = "0.40.0", features = ["bundled"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-size = "0.5.0"
-tempfile = "3.10.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-unicode-width = "0.2.0"
-yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }
+derive_more         = { features = [ "full" ], version = "2.0.1" }
+diff                = "0.1.13"
+eyre                = "0.6"
+itertools           = "0.14.0"
+pathfinding         = "4.14.0"
+proptest            = "1.6.0"
+rusqlite            = { features = [ "bundled" ], version = "0.40.0" }
+serde               = { features = [ "derive" ], version = "1.0.228" }
+serde_json          = "1.0.149"
+size                = "0.5.0"
+tempfile            = "3.10.0"
+tracing             = "0.1"
+tracing-subscriber  = { features = [ "env-filter" ], version = "0.3" }
+unicode-width       = "0.2.0"
+yansi               = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
 
 # See:
 #  <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>
 [workspace.lints.clippy]
 # The lint groups above enable some less-than-desirable rules, we should manually
 # enable those to keep our sanity.
-absolute_paths = "allow"
-arbitrary_source_item_ordering = "allow"
-cargo = { level = "warn", priority = -1 }
-clone_on_ref_ptr = "warn"
-complexity = { level = "warn", priority = -1 }
-dbg_macro = "warn"
-empty_drop = "warn"
-empty_structs_with_brackets = "warn"
-exit = "warn"
-expect_used = "warn"
-filetype_is_file = "warn"
-get_unwrap = "warn"
-implicit_return = "allow"
-infinite_loop = "warn"
+absolute_paths                       = "allow"
+arbitrary_source_item_ordering       = "allow"
+cargo                                = { level = "warn", priority = -1 }
+clone_on_ref_ptr                     = "warn"
+complexity                           = { level = "warn", priority = -1 }
+dbg_macro                            = "warn"
+empty_drop                           = "warn"
+empty_structs_with_brackets          = "warn"
+exit                                 = "warn"
+expect_used                          = "warn"
+filetype_is_file                     = "warn"
+get_unwrap                           = "warn"
+implicit_return                      = "allow"
+infinite_loop                        = "warn"
 map_with_unused_argument_over_ranges = "warn"
-missing_docs_in_private_items = "allow"
-non_ascii_literal = "allow"
-non_std_lazy_statics = "warn"
-nursery = { level = "warn", priority = -1 }
-pathbuf_init_then_push = "warn"
-pattern_type_mismatch = "allow"
-pedantic = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-print_stderr = "warn"
-print_stdout = "warn"
-question_mark_used = "allow"
-rc_buffer = "warn"
-rc_mutex = "warn"
-rest_pat_in_fully_bound_structs = "warn"
-similar_names = "allow"
-single_call_fn = "allow"
-std_instead_of_core = "allow"
-style = { level = "warn", priority = -1 }
-todo = "warn"
-too_long_first_doc_paragraph = "allow"
-too_many_lines = "allow"
-undocumented_unsafe_blocks = "warn"
-unimplemented = "warn"
-unnecessary_safety_comment = "warn"
-unreachable = "warn"
-unused_result_ok = "warn"
-unused_trait_names = "allow"
+missing_docs_in_private_items        = "allow"
+non_ascii_literal                    = "allow"
+non_std_lazy_statics                 = "warn"
+nursery                              = { level = "warn", priority = -1 }
+pathbuf_init_then_push               = "warn"
+pattern_type_mismatch                = "allow"
+pedantic                             = { level = "warn", priority = -1 }
+perf                                 = { level = "warn", priority = -1 }
+print_stderr                         = "warn"
+print_stdout                         = "warn"
+question_mark_used                   = "allow"
+rc_buffer                            = "warn"
+rc_mutex                             = "warn"
+rest_pat_in_fully_bound_structs      = "warn"
+similar_names                        = "allow"
+single_call_fn                       = "allow"
+std_instead_of_core                  = "allow"
+style                                = { level = "warn", priority = -1 }
+todo                                 = "warn"
+too_long_first_doc_paragraph         = "allow"
+too_many_lines                       = "allow"
+undocumented_unsafe_blocks           = "warn"
+unimplemented                        = "warn"
+unnecessary_safety_comment           = "warn"
+unreachable                          = "warn"
+unused_result_ok                     = "warn"
+unused_trait_names                   = "allow"
 
 [profile.release]
-opt-level = 3
-lto = "fat"
 codegen-units = 1
+lto           = "fat"
+opt-level     = 3

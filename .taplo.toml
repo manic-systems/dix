@@ -1,4 +1,4 @@
-# Taken from https://github.com/cull-os/carcass.
+exclude = [ ".direnv/**" ]
 
 [formatting]
 align_entries         = true
