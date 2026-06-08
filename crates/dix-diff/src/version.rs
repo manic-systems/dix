@@ -163,37 +163,13 @@ fn component_rank(
   }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ComponentRank {
   SuffixText,
   Missing,
   FirstNumeric,
   FirstText,
   SuffixNumeric,
-}
-
-impl ComponentRank {
-  const fn sort_key(self) -> u8 {
-    match self {
-      Self::SuffixText => 0,
-      Self::Missing => 1,
-      Self::FirstNumeric => 2,
-      Self::FirstText => 3,
-      Self::SuffixNumeric => 4,
-    }
-  }
-}
-
-impl PartialOrd for ComponentRank {
-  fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-    Some(self.cmp(other))
-  }
-}
-
-impl Ord for ComponentRank {
-  fn cmp(&self, other: &Self) -> cmp::Ordering {
-    self.sort_key().cmp(&other.sort_key())
-  }
 }
 
 impl<T: Into<String>> From<T> for Version {
