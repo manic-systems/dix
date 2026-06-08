@@ -4,7 +4,17 @@ This is a changelog of the `dix` repository. It follows the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0-dev] - Unreleased
+## 2.0.1
+
+## Added
+
+- Added proper CI tests for all supported systems, formatting and checks.
+
+## Fixed
+
+- Fixed build failures on aarch64-darwin and failing tests on x86_64-linux.
+
+## 2.0.0
 
 ### Added
 
