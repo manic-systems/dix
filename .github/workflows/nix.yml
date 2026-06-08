@@ -1,42 +1,59 @@
-name: Nix CI
+name: Build dix with Nix
 
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  check:
-    name: Nix CI (${{ matrix.system }})
-    runs-on: ${{ matrix.runner_label }}
-
-    permissions:
-      id-token: write
-      contents: read
-
+  build:
+    name: Nix Package (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
+        system:
+          - x86_64-linux
+          - aarch64-linux
+          - aarch64-darwin
         include:
           - system: x86_64-linux
-            runner_label: ubuntu-latest
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
           - system: aarch64-darwin
-            runner_label: macos-latest
+            runner: macos-15
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v21
+      - uses: cachix/install-nix-action@v31
         with:
-          determinate: true
-          extra-conf: lazy-trees = true
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Up Cachix
-        uses: cachix/cachix-action@v16
+      - name: Restore cached paths
+        id: cache-store-restore
+        uses: nix-community/cache-nix-action@v7
         with:
-          name: dix
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          primary-key: nix-${{ matrix.system }}-${{ hashFiles('flake.nix', 'flake.lock', 'Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml') }}
+          restore-prefixes-first-match: nix-${{ matrix.system }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ matrix.system }}-
+          purge-created: 0
+          purge-last-accessed: 0
+          purge-primary-key: never
 
-      - name: Run `nix flake check`
-        run: nix flake check
+      - name: Build dix
+        run: nix build .#packages.${{ matrix.system }}.dix -L --no-link
