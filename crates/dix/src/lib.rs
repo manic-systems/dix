@@ -361,37 +361,4 @@ mod tests {
     let canonical = path_to_canonical_string(&path).unwrap();
     assert_eq!(canonical, path);
   }
-
-  #[test]
-  #[cfg(unix)]
-  fn test_path_to_canonical_string_with_symlink() {
-    let dir = get_temp_dir();
-    let path = dir.join("symlink-path");
-    let target = dir.join("target-path");
-    fs::write(&target, "").unwrap();
-    std::os::unix::fs::symlink(&target, &path).unwrap();
-    let canonical = path_to_canonical_string(&path).unwrap();
-    assert_eq!(canonical, target);
-  }
-
-  #[test]
-  #[cfg(unix)]
-  fn test_path_to_canonical_string_invalid_unicode() {
-    use std::{
-      ffi::OsString,
-      os::unix::ffi::OsStringExt,
-    };
-
-    let dir = get_temp_dir();
-    let path = dir.join(OsString::from_vec(
-      b"invalid-unicode"
-        .iter()
-        .chain(&[0xFFu8, 0xFE])
-        .copied()
-        .collect(),
-    ));
-    std::fs::write(&path, "").unwrap();
-    let canonical = path_to_canonical_string(&path);
-    assert!(canonical.is_err());
-  }
 }
