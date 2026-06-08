@@ -12,6 +12,12 @@ use derive_more::{
 const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
 
 /// A version string with semantic comparison support.
+///
+/// Ordering compares separator-delimited components. Empty versions sort before
+/// non-empty versions; after a shared prefix, text suffixes sort below the base
+/// version and numeric suffixes sort above it. `Ord` uses the raw version
+/// string as a final tie-breaker so distinct strings remain distinct
+/// ordered-map keys.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Version {
   pub name: String,
@@ -79,17 +85,20 @@ impl Version {
     let other_comps: Vec<_> = other.components().collect();
     let mut saw_unordered = false;
 
-    let min_len = self_comps.len().min(other_comps.len());
-
-    for i in 0..min_len {
-      let self_comp = self_comps[i];
-      let other_comp = other_comps[i];
+    for index in 0..self_comps.len().max(other_comps.len()) {
+      let self_comp = self_comps.get(index).copied();
+      let other_comp = other_comps.get(index).copied();
 
       if self_comp == other_comp {
         continue;
       }
 
-      match compare_component(self_comp, other_comp) {
+      match compare_component_at(
+        index,
+        self_comp,
+        other_comp,
+        &mut compare_component,
+      ) {
         ComparedVersionComponents::Equal
         | ComparedVersionComponents::Ordered(cmp::Ordering::Equal) => {},
         ComparedVersionComponents::Ordered(ordering) => {
@@ -101,15 +110,89 @@ impl Version {
       }
     }
 
-    let suffix_ordering =
-      compare_component_suffixes(&self_comps, &other_comps, min_len);
-    match suffix_ordering {
-      cmp::Ordering::Equal if saw_unordered => {
-        ComparedVersionComponents::Unordered
-      },
-      cmp::Ordering::Equal => ComparedVersionComponents::Equal,
-      ordering => ComparedVersionComponents::Ordered(ordering),
+    if saw_unordered {
+      ComparedVersionComponents::Unordered
+    } else {
+      ComparedVersionComponents::Equal
     }
+  }
+}
+
+fn compare_component_at(
+  index: usize,
+  self_comp: Option<VersionComponent<'_>>,
+  other_comp: Option<VersionComponent<'_>>,
+  compare_component: &mut impl FnMut(
+    VersionComponent<'_>,
+    VersionComponent<'_>,
+  ) -> ComparedVersionComponents,
+) -> ComparedVersionComponents {
+  let rank_ordering =
+    component_rank(index, self_comp).cmp(&component_rank(index, other_comp));
+
+  let (Some(self_comp), Some(other_comp)) = (self_comp, other_comp) else {
+    return ComparedVersionComponents::Ordered(rank_ordering);
+  };
+
+  match compare_component(self_comp, other_comp) {
+    ComparedVersionComponents::Unordered => {
+      ComparedVersionComponents::Unordered
+    },
+    ComparedVersionComponents::Equal
+    | ComparedVersionComponents::Ordered(cmp::Ordering::Equal) => {
+      ComparedVersionComponents::Equal
+    },
+    ComparedVersionComponents::Ordered(ordering) => {
+      ComparedVersionComponents::Ordered(rank_ordering.then(ordering))
+    },
+  }
+}
+
+fn component_rank(
+  index: usize,
+  component: Option<VersionComponent<'_>>,
+) -> ComponentRank {
+  // The first slot sorts empty versions below real versions. After a shared
+  // prefix, text suffixes sort below the base and numeric suffixes above it.
+  match (index, component.map(|component| component.is_numeric())) {
+    (_, None) => ComponentRank::Missing,
+    (0, Some(true)) => ComponentRank::FirstNumeric,
+    (0, Some(false)) => ComponentRank::FirstText,
+    (_, Some(false)) => ComponentRank::SuffixText,
+    (_, Some(true)) => ComponentRank::SuffixNumeric,
+  }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComponentRank {
+  SuffixText,
+  Missing,
+  FirstNumeric,
+  FirstText,
+  SuffixNumeric,
+}
+
+impl ComponentRank {
+  const fn sort_key(self) -> u8 {
+    match self {
+      Self::SuffixText => 0,
+      Self::Missing => 1,
+      Self::FirstNumeric => 2,
+      Self::FirstText => 3,
+      Self::SuffixNumeric => 4,
+    }
+  }
+}
+
+impl PartialOrd for ComponentRank {
+  fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for ComponentRank {
+  fn cmp(&self, other: &Self) -> cmp::Ordering {
+    self.sort_key().cmp(&other.sort_key())
   }
 }
 
@@ -127,37 +210,16 @@ impl PartialOrd for Version {
 
 impl Ord for Version {
   fn cmp(&self, other: &Self) -> cmp::Ordering {
-    match self.compare_components_with(other, |self_comp, other_comp| {
-      ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
-    }) {
-      ComparedVersionComponents::Ordered(ordering) => ordering,
-      ComparedVersionComponents::Equal
-      | ComparedVersionComponents::Unordered => cmp::Ordering::Equal,
-    }
-  }
-}
+    let component_ordering =
+      match self.compare_components_with(other, |self_comp, other_comp| {
+        ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
+      }) {
+        ComparedVersionComponents::Ordered(ordering) => ordering,
+        ComparedVersionComponents::Equal
+        | ComparedVersionComponents::Unordered => cmp::Ordering::Equal,
+      };
 
-fn compare_component_suffixes(
-  self_comps: &[VersionComponent<'_>],
-  other_comps: &[VersionComponent<'_>],
-  prefix_len: usize,
-) -> cmp::Ordering {
-  match self_comps.len().cmp(&other_comps.len()) {
-    cmp::Ordering::Equal => cmp::Ordering::Equal,
-    cmp::Ordering::Greater => {
-      if self_comps[prefix_len..].iter().any(|c| !c.is_numeric()) {
-        cmp::Ordering::Less
-      } else {
-        cmp::Ordering::Greater
-      }
-    },
-    cmp::Ordering::Less => {
-      if other_comps[prefix_len..].iter().any(|c| !c.is_numeric()) {
-        cmp::Ordering::Greater
-      } else {
-        cmp::Ordering::Less
-      }
-    },
+    component_ordering.then_with(|| self.name.cmp(&other.name))
   }
 }
 
@@ -353,6 +415,7 @@ mod tests {
       assert!(!(c < b && b < a) || c < a);
     }
 
+    #[test]
     fn test_version_reflexivity(
       a in ".*",
     ) {
@@ -363,6 +426,7 @@ mod tests {
       assert_eq!(a, b);
     }
 
+    #[test]
     fn test_version_antisymmetry(
       a in ".*",
       b in ".*",
@@ -376,6 +440,59 @@ mod tests {
       }
     }
 
+  }
+
+  #[test]
+  fn version_transitivity_regression_for_empty_text_and_numeric_components() {
+    let empty = Version::new("");
+    let numeric = Version::new("0");
+    let text = Version::new(":");
+
+    assert!(empty < text);
+    assert!(numeric < text);
+    assert!(empty < numeric);
+  }
+
+  #[test]
+  fn version_suffix_order_is_transitive() {
+    let base = Version::new("1");
+    let text = Version::new("1-alpha");
+    let hyphen_numeric = Version::new("1-0");
+    let dot_numeric = Version::new("1.0");
+
+    assert!(text < base);
+    assert!(base < hyphen_numeric);
+    assert!(base < dot_numeric);
+    assert!(text < hyphen_numeric);
+    assert!(text < dot_numeric);
+  }
+
+  #[test]
+  fn version_order_keeps_component_equal_strings_distinct() {
+    use std::collections::BTreeSet;
+
+    let dotted = Version::new("1.0");
+    let hyphenated = Version::new("1-0");
+    let mut versions = BTreeSet::new();
+
+    versions.insert(dotted.clone());
+    versions.insert(hyphenated.clone());
+
+    assert_ne!(dotted, hyphenated);
+    assert_ne!(dotted.cmp(&hyphenated), std::cmp::Ordering::Equal);
+    assert_eq!(versions.len(), 2);
+  }
+
+  #[test]
+  fn change_ordering_treats_component_equal_strings_as_changed() {
+    let dotted = Version::new("1.0");
+    let hyphenated = Version::new("1-0");
+
+    assert_eq!(
+      dotted.change_ordering(&hyphenated),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Equal),
+    );
+    assert_ne!(dotted.cmp(&hyphenated), std::cmp::Ordering::Equal);
   }
 
   #[test]
@@ -403,6 +520,7 @@ mod tests {
     assert!(Version::new("2.1.0") > Version::new("2.0.9"));
     assert!(Version::new("2.0.1") > Version::new("2.0.0"));
     assert!(Version::new("1.0.0") > Version::new("1.0.0-pre"));
+    assert!(Version::new("1.0.0") > Version::new("1.0.0-alpha"));
     assert!(Version::new("1.0.0-beta") > Version::new("1.0.0-alpha"));
     assert!(Version::new("1.0.0-beta.11") > Version::new("1.0.0-beta.2"));
     assert_eq!(Version::new("1.0.0"), Version::new("1.0.0"));
@@ -541,9 +659,11 @@ mod tests {
   }
 
   #[test]
-  fn version_comparison_pre_release_edge_cases() {
+  fn version_comparison_suffix_edge_cases() {
     assert!(Version::new("1.0.0") > Version::new("1.0.0-alpha"));
     assert!(Version::new("1.0.0-alpha") < Version::new("1.0.0"));
+    assert!(Version::new("1.0.0-1") > Version::new("1.0.0"));
+    assert!(Version::new("1.0.0-alpha") < Version::new("1.0.0-1"));
     assert!(Version::new("1.0.0-alpha") < Version::new("1.0.0-beta"));
     assert!(Version::new("1.0.0-1") < Version::new("1.0.0-2"));
     assert!(Version::new("1.0.0-9") < Version::new("1.0.0-10"));
