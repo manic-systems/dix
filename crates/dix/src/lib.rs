@@ -149,8 +149,7 @@ fn path_to_canonical_string(path: &Path) -> Result<String> {
     tracing::debug!("path contains invalid unicode characters");
     eyre!(
       "failed to convert path '{path}' to valid unicode",
-      path = Path::new(&*path).display(), /* TODO: use .display() directly
-                                           * after Rust 1.87.0 in flake. */
+      path = path.display(),
     )
   })?;
 
