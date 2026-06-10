@@ -48,7 +48,10 @@ impl TryFrom<PathBuf> for StorePath {
     tracing::trace!(path = %path.display(), "validating store path");
     if !(path.starts_with("/nix/store")
       || cfg!(test) && path.starts_with("/tmp/")
-      || cfg!(test) && path.starts_with(std::env::temp_dir()))
+      || cfg!(test) && path.starts_with(std::env::temp_dir())
+      || cfg!(test)
+        && std::fs::canonicalize(std::env::temp_dir())
+          .is_ok_and(|dir| path.starts_with(dir)))
     {
       bail!(
         "path {path} must start with /nix/store or {temp_dir}",
@@ -358,6 +361,6 @@ mod tests {
     let path = dir.join("simple-basic-path");
     fs::write(&path, "").unwrap();
     let canonical = path_to_canonical_string(&path).unwrap();
-    assert_eq!(canonical, path);
+    assert_eq!(canonical, path.canonicalize().unwrap());
   }
 }
