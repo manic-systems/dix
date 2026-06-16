@@ -4,13 +4,32 @@ This is a changelog of the `dix` repository. It follows the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.0.2
+
+### Added
+
+- Added `StoreSnapshot`, `query_store_snapshot(...)`,
+  `query_store_snapshot_with_backend(...)`, and `diff_store_snapshots(...)`
+  for users who want to capture store data separately from report generation.
+  This lets callers provide snapshots from custom sources, including remote
+  machines or persisted snapshot files.
+- Added `CommandBackend::store_url(...)` for callers that want command-backed
+  queries to target a specific Nix store URI.
+
+### Changed
+
+- Changed store-backed report generation to always query two in-memory store
+  snapshots before comparing them. The existing `query_diff_report(...)` API
+  continues to work, but now uses the same snapshot comparison path exposed to
+  crate users.
+
 ## 2.0.1
 
-## Added
+### Added
 
 - Added proper CI tests for all supported systems, formatting and checks.
 
-## Fixed
+### Fixed
 
 - Fixed build failures on aarch64-darwin and failing tests on x86_64-linux.
 
