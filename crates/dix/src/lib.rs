@@ -30,10 +30,18 @@ pub use report::{
   PackageDiff,
   PackageSizeDelta,
   PathStats,
+  diff_store_snapshots,
   query_diff_report,
 };
 
+pub mod snapshot;
+pub use snapshot::{
+  StoreSnapshot,
+  query_store_snapshot,
+  query_store_snapshot_with_backend,
+};
 pub mod store;
+pub use store::CommandBackend;
 
 /// A validated store path. Always starts with `/nix/store`.
 ///

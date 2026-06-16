@@ -29,29 +29,33 @@ use crate::{
   },
 };
 
-#[derive(Debug)]
 /// Uses nix commands to perform queries.
 ///
 /// This is similar in implementation to the old `dix` in its early stages and
 /// is supposed to be a final fallback if the direct queries on the database
-/// fail. It is considerably slower than the direct queries and currently does
-/// not support querying the whole dependency graph.
+/// fail. It is considerably slower than the direct queries.
 ///
 /// The internal command use is configurable but is expected to be a drop-in
 /// replacement for the nix-store command.
+#[derive(Debug)]
 pub struct CommandBackend {
   nix_store_cmd: String,
   nix_cmd:       String,
+  store_url:     Option<String>,
 }
 
 impl Display for CommandBackend {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(
       f,
-      "CommandBackend(nix='{cmd}', nix-store='{store}')",
+      "CommandBackend(nix='{cmd}', nix-store='{store}'",
       cmd = self.nix_cmd,
-      store = self.nix_store_cmd
-    )
+      store = self.nix_store_cmd,
+    )?;
+    if let Some(store_url) = &self.store_url {
+      write!(f, ", store='{store_url}'")?;
+    }
+    write!(f, ")")
   }
 }
 
@@ -60,6 +64,7 @@ impl Default for CommandBackend {
     Self {
       nix_store_cmd: "nix-store".to_owned(),
       nix_cmd:       "nix".to_owned(),
+      store_url:     None,
     }
   }
 }
@@ -70,7 +75,32 @@ impl CommandBackend {
     Self {
       nix_store_cmd: cmd_nix_store,
       nix_cmd:       cmd_nix,
+      store_url:     None,
     }
+  }
+
+  /// Use a specific Nix store URI for command-backed queries.
+  #[must_use]
+  pub fn store_url(mut self, store_url: impl Into<String>) -> Self {
+    self.store_url = Some(store_url.into());
+    self
+  }
+
+  fn nix_store_command(&self) -> Command {
+    let mut command = Command::new(&self.nix_store_cmd);
+    if let Some(store_url) = &self.store_url {
+      command.arg("--store").arg(store_url);
+    }
+    command
+  }
+
+  fn nix_command(&self, subcommand: &str) -> Command {
+    let mut command = Command::new(&self.nix_cmd);
+    command.arg(subcommand);
+    if let Some(store_url) = &self.store_url {
+      command.arg("--store").arg(store_url);
+    }
+    command
   }
 }
 
@@ -126,7 +156,8 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
-    let output = Command::new(&self.nix_store_cmd)
+    let output = self
+      .nix_store_command()
       .args(["--query", "--references"])
       .arg(system.join("sw"))
       .output()
@@ -144,7 +175,8 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
-    let output = Command::new(&self.nix_store_cmd)
+    let output = self
+      .nix_store_command()
       .args(["--query", "--requisites"])
       .arg(path)
       .output()
@@ -162,8 +194,9 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
-    let output = Command::new(&self.nix_cmd)
-      .args(["path-info", "--recursive", "--size"])
+    let output = self
+      .nix_command("path-info")
+      .args(["--recursive", "--size"])
       .arg(path)
       .output()
       .wrap_err("Encountered error while executing nix command")?;
@@ -206,6 +239,21 @@ mod tests {
       .map(|(index, path)| format!("{path} {}", index + 1))
       .collect::<Vec<String>>()
       .join("\n")
+  }
+
+  fn command_args(command: &Command) -> Vec<String> {
+    command
+      .get_args()
+      .map(|arg| arg.to_string_lossy().into_owned())
+      .collect()
+  }
+
+  #[test]
+  fn store_url_is_added_to_nix_store_commands() {
+    let backend = CommandBackend::default().store_url("ssh://builder");
+    let command = backend.nix_store_command();
+
+    assert_eq!(command_args(&command), vec!["--store", "ssh://builder"]);
   }
 
   #[test]
