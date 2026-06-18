@@ -160,15 +160,16 @@ fn write_size_diff(
     size_new = size_new.green(),
   )?;
 
+  let (sign, styled_diff) = match size_diff.bytes().cmp(&0) {
+    Ordering::Less => ("-", size_diff.red()),
+    Ordering::Equal => ("", size_diff.resetting()),
+    Ordering::Greater => ("+", size_diff.green()),
+  };
+
   writeln!(
     writer,
-    "{header}: {size_diff}",
+    "{header}: {sign}{styled_diff}",
     header = "DIFF".bold(),
-    size_diff = match size_diff.bytes().cmp(&0) {
-      Ordering::Less => size_diff.green(),
-      Ordering::Equal => size_diff.resetting(),
-      Ordering::Greater => size_diff.red(),
-    },
   )
 }
 
