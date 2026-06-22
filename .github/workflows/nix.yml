@@ -36,7 +36,7 @@ jobs:
             runner: macos-15
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - uses: cachix/install-nix-action@v31
         with:
