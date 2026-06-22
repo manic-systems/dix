@@ -22,7 +22,7 @@ clap-verbosity-flag = "3.0.2"
 derive_more         = { features = [ "full" ], version = "2.0.1" }
 diff                = "0.1.13"
 eyre                = "0.6"
-itertools           = "0.14.0"
+itertools           = "0.15.0"
 pathfinding         = "4.14.0"
 proptest            = "1.6.0"
 rusqlite            = { features = [ "bundled" ], version = "0.40.0" }
