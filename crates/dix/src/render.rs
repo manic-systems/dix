@@ -161,16 +161,12 @@ fn write_size_diff(
   )?;
 
   let (sign, styled_diff) = match size_diff.bytes().cmp(&0) {
-    Ordering::Less => ("-", size_diff.red()),
+    Ordering::Less => ("", size_diff.red()),
     Ordering::Equal => ("", size_diff.resetting()),
     Ordering::Greater => ("+", size_diff.green()),
   };
 
-  writeln!(
-    writer,
-    "{header}: {sign}{styled_diff}",
-    header = "DIFF".bold(),
-  )
+  writeln!(writer, "{}: {sign}{styled_diff}", "DIFF".bold())
 }
 
 fn write_path_stats(
