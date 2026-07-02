@@ -1,6 +1,6 @@
 [package]
 name                 = "dix-diff"
-version.workspace    = true
+version              = "2.1.0"
 edition.workspace    = true
 description          = "Internal pure diff engine for dix"
 readme               = "../../README.md"
