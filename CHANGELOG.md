@@ -4,13 +4,19 @@ This is a changelog of the `dix` repository. It follows the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 2.1.1 (Unreleased)
+## 2.2.1 (Unreleased)
 
 ### Added
 
 ### Fixed
 
 ### Changed
+
+## 2.2.0
+
+### Added
+
+- CommandBackend now has an `env()` function to pass environment variables to the executed Nix command.
 
 ## 2.1.0
 
