@@ -1,4 +1,5 @@
 use std::{
+  ffi::OsString,
   fmt::{
     self,
     Display,
@@ -42,6 +43,7 @@ pub struct CommandBackend {
   nix_store_cmd: String,
   nix_cmd:       String,
   store_url:     Option<String>,
+  env:           Vec<(OsString, OsString)>,
 }
 
 impl Display for CommandBackend {
@@ -65,6 +67,7 @@ impl Default for CommandBackend {
       nix_store_cmd: "nix-store".to_owned(),
       nix_cmd:       "nix".to_owned(),
       store_url:     None,
+      env:           Vec::new(),
     }
   }
 }
@@ -76,6 +79,7 @@ impl CommandBackend {
       nix_store_cmd: cmd_nix_store,
       nix_cmd:       cmd_nix,
       store_url:     None,
+      env:           Vec::new(),
     }
   }
 
@@ -86,8 +90,26 @@ impl CommandBackend {
     self
   }
 
+  /// Set an environment variable for command-backed queries.
+  #[must_use]
+  pub fn env(
+    mut self,
+    key: impl Into<OsString>,
+    value: impl Into<OsString>,
+  ) -> Self {
+    self.env.push((key.into(), value.into()));
+    self
+  }
+
+  fn apply_env(&self, command: &mut Command) {
+    for (key, value) in &self.env {
+      command.env(key, value);
+    }
+  }
+
   fn nix_store_command(&self) -> Command {
     let mut command = Command::new(&self.nix_store_cmd);
+    self.apply_env(&mut command);
     if let Some(store_url) = &self.store_url {
       command.arg("--store").arg(store_url);
     }
@@ -96,6 +118,7 @@ impl CommandBackend {
 
   fn nix_command(&self, subcommand: &str) -> Command {
     let mut command = Command::new(&self.nix_cmd);
+    self.apply_env(&mut command);
     command.arg(subcommand);
     if let Some(store_url) = &self.store_url {
       command.arg("--store").arg(store_url);
@@ -248,12 +271,43 @@ mod tests {
       .collect()
   }
 
+  fn command_env(command: &Command, key: &str) -> Option<String> {
+    command.get_envs().find_map(|(env_key, env_value)| {
+      (env_key == key)
+        .then(|| env_value.map(|value| value.to_string_lossy().into_owned()))?
+    })
+  }
+
   #[test]
   fn store_url_is_added_to_nix_store_commands() {
     let backend = CommandBackend::default().store_url("ssh://builder");
     let command = backend.nix_store_command();
 
     assert_eq!(command_args(&command), vec!["--store", "ssh://builder"]);
+  }
+
+  #[test]
+  fn env_is_added_to_nix_store_commands() {
+    let backend =
+      CommandBackend::default().env("NIX_SSHOPTS", "-o ControlMaster=auto");
+    let command = backend.nix_store_command();
+
+    assert_eq!(
+      command_env(&command, "NIX_SSHOPTS").as_deref(),
+      Some("-o ControlMaster=auto")
+    );
+  }
+
+  #[test]
+  fn env_is_added_to_nix_commands() {
+    let backend =
+      CommandBackend::default().env("NIX_SSHOPTS", "-o ControlMaster=auto");
+    let command = backend.nix_command("path-info");
+
+    assert_eq!(
+      command_env(&command, "NIX_SSHOPTS").as_deref(),
+      Some("-o ControlMaster=auto")
+    );
   }
 
   #[test]
