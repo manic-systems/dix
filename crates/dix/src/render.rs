@@ -152,21 +152,19 @@ fn write_size_diff(
 ) -> fmt::Result {
   let size_diff = size_new - size_old;
 
-  writeln!(
-    writer,
-    "{header}: {size_old} -> {size_new}",
-    header = "SIZE".bold(),
-    size_old = size_old.red(),
-    size_new = size_new.green(),
-  )?;
-
   let (sign, styled_diff) = match size_diff.bytes().cmp(&0) {
     Ordering::Less => ("", size_diff.red()),
     Ordering::Equal => ("", size_diff.resetting()),
     Ordering::Greater => ("+", size_diff.green()),
   };
 
-  writeln!(writer, "{}: {sign}{styled_diff}", "DIFF".bold())
+  writeln!(
+    writer,
+    "{header}: {size_old} -> {size_new} ({sign}{styled_diff})",
+    header = "SIZE".bold(),
+    size_old = size_old.red(),
+    size_new = size_new.green(),
+  )
 }
 
 fn write_path_stats(
