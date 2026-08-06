@@ -19,7 +19,6 @@ dix-diff = { path = "crates/dix-diff", version = "2.1.0" }
 
 clap                = { features = [ "derive" ], version = "4.5.37" }
 clap-verbosity-flag = "3.0.2"
-derive_more         = { features = [ "full" ], version = "2.0.1" }
 diff                = "0.1.13"
 eyre                = "0.6"
 itertools           = "0.15.0"

@@ -3,11 +3,6 @@ use std::{
   fmt,
 };
 
-use derive_more::{
-  Deref,
-  Display,
-};
-
 /// Separators used to split version strings.
 const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
 
@@ -277,8 +272,22 @@ impl<'a> VersionPiece<'a> {
 }
 
 /// A single version component (numeric or text).
-#[derive(Display, Debug, Clone, Copy, Deref, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VersionComponent<'a>(&'a str);
+
+impl<'a> std::ops::Deref for VersionComponent<'a> {
+  type Target = &'a str;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl fmt::Display for VersionComponent<'_> {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    self.0.fmt(formatter)
+  }
+}
 
 impl VersionComponent<'_> {
   #[must_use]

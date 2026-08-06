@@ -15,7 +15,6 @@ dix-diff = { workspace = true }
 
 clap                = { workspace = true }
 clap-verbosity-flag = { workspace = true }
-derive_more         = { workspace = true }
 diff                = { workspace = true }
 eyre                = { workspace = true }
 itertools           = { workspace = true }
