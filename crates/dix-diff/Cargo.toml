@@ -11,8 +11,7 @@ keywords.workspace   = true
 categories.workspace = true
 
 [dependencies]
-itertools   = { workspace = true }
-pathfinding = { workspace = true }
+itertools = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -1,14 +1,9 @@
 use std::{
   cmp::min,
-  collections::HashSet,
   mem::swap,
 };
 
 use itertools::EitherOrBoth;
-use pathfinding::{
-  kuhn_munkres,
-  matrix::Matrix,
-};
 
 use crate::{
   VersionAmount,
@@ -20,49 +15,133 @@ use crate::{
 
 /// Computes the Levenshtein distance between two slices.
 fn levenshtein<T: Eq>(from: &[T], to: &[T]) -> usize {
-  let (from_len, to_len) = (from.len(), to.len());
+  // Equal prefixes and suffixes never contribute to edit distance. Version
+  // strings commonly share both, so trim them before allocating the DP rows.
+  let prefix_len = from
+    .iter()
+    .zip(to)
+    .take_while(|(left, right)| left == right)
+    .count();
+  let from = &from[prefix_len..];
+  let to = &to[prefix_len..];
 
-  if from_len == 0 {
-    return to_len;
+  let suffix_len = from
+    .iter()
+    .rev()
+    .zip(to.iter().rev())
+    .take_while(|(left, right)| left == right)
+    .count();
+  let from = &from[..from.len() - suffix_len];
+  let to = &to[..to.len() - suffix_len];
+
+  if from.is_empty() {
+    return to.len();
   }
-  if to_len == 0 {
-    return from_len;
+  if to.is_empty() {
+    return from.len();
   }
 
-  // Use 'from' as the shorter slice for memory efficiency
-  let (from, to, from_len, to_len) = if from_len > to_len {
-    (to, from, to_len, from_len)
+  // Columns determine the DP buffer size, so use the shorter slice there.
+  let (rows, columns) = if from.len() >= to.len() {
+    (from, to)
   } else {
-    (from, to, from_len, to_len)
+    (to, from)
   };
 
-  let mut prev: Vec<usize> = (0..=to_len).collect();
-  let mut curr = vec![0; to_len + 1];
+  let mut previous: Vec<usize> = (0..=columns.len()).collect();
+  let mut current = vec![0; columns.len() + 1];
 
-  for i in 1..=from_len {
-    curr[0] = i;
-    for j in 1..=to_len {
-      let cost = usize::from(from[i - 1] != to[j - 1]);
-      curr[j] = min(min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+  for (row_index, row) in rows.iter().enumerate() {
+    current[0] = row_index + 1;
+    for (column_index, column) in columns.iter().enumerate() {
+      let substitution_cost = usize::from(row != column);
+      current[column_index + 1] = min(
+        min(current[column_index] + 1, previous[column_index + 1] + 1),
+        previous[column_index] + substitution_cost,
+      );
     }
-    swap(&mut prev, &mut curr);
+    swap(&mut previous, &mut current);
   }
 
-  prev[to_len]
+  previous[columns.len()]
 }
 
-/// Takes two lists of versions and tries to match them using the Hungarian
-/// algorithm. The matching attempts to minimize the edit distance between
-/// version pairs, which means:
+/// Finds a minimum-cost, order-preserving matching between two sequences.
 ///
-/// 1. Versions with minimal edit distance are paired
-/// 2. The natural ordering of versions is preserved where possible
+/// The result contains `min(left_len, right_len)` `(left, right)` index pairs.
+/// Every index occurs at most once, and both indexes increase monotonically.
+fn minimum_cost_ordered_matching(
+  left_len: usize,
+  right_len: usize,
+  cost: impl Fn(usize, usize) -> usize,
+) -> Vec<(usize, usize)> {
+  if left_len == 0 || right_len == 0 {
+    return Vec::new();
+  }
+
+  let was_transposed = left_len > right_len;
+  let (shorter_len, longer_len) = if was_transposed {
+    (right_len, left_len)
+  } else {
+    (left_len, right_len)
+  };
+
+  // `best[i][j]` is the minimum cost of matching the first `i` items from the
+  // shorter sequence into the first `j` items from the longer one.
+  let mut best = vec![vec![usize::MAX; longer_len + 1]; shorter_len + 1];
+  best[0].fill(0);
+
+  for shorter in 1..=shorter_len {
+    // Fewer than `shorter` columns cannot hold a matching of this size.
+    for longer in shorter..=longer_len {
+      let skip = best[shorter][longer - 1];
+      let pair_cost = if was_transposed {
+        cost(longer - 1, shorter - 1)
+      } else {
+        cost(shorter - 1, longer - 1)
+      };
+      let pair = best[shorter - 1][longer - 1].saturating_add(pair_cost);
+      best[shorter][longer] = min(skip, pair);
+    }
+  }
+
+  // Walk the table backwards. When skipping and pairing have equal cost,
+  // prefer skipping the later item so matches stay as early as possible.
+  let mut shorter = shorter_len;
+  let mut longer = longer_len;
+  let mut matching = Vec::with_capacity(shorter_len);
+  while shorter > 0 {
+    if longer > shorter && best[shorter][longer] == best[shorter][longer - 1] {
+      longer -= 1;
+      continue;
+    }
+
+    let pair = if was_transposed {
+      (longer - 1, shorter - 1)
+    } else {
+      (shorter - 1, longer - 1)
+    };
+    matching.push(pair);
+    shorter -= 1;
+    longer -= 1;
+  }
+
+  matching.reverse();
+  matching
+}
+
+/// Takes two ordered lists of versions and matches them while preserving their
+/// order. The matching:
+///
+/// 1. Pairs every version from the shorter list.
+/// 2. Minimizes the total edit distance between paired versions.
+/// 3. Never crosses two version pairs.
 ///
 /// Returns a vector of paired or unpaired versions (as `EitherOrBoth` enum).
 #[must_use]
 pub fn match_version_amounts<'a>(
-  mut from: &'a [VersionAmount],
-  mut to: &'a [VersionAmount],
+  from: &'a [VersionAmount],
+  to: &'a [VersionAmount],
 ) -> Vec<EitherOrBoth<&'a VersionAmount>> {
   // Early return for empty inputs
   if from.is_empty() {
@@ -72,19 +151,14 @@ pub fn match_version_amounts<'a>(
     return from.iter().map(EitherOrBoth::Left).collect();
   }
 
-  // Quick path for common case - exact match
-  if from.len() == 1 && to.len() == 1 && from[0].version == to[0].version {
-    return vec![EitherOrBoth::Both(&from[0], &to[0])];
+  // Equal-length order-preserving matchings have exactly one solution.
+  if from.len() == to.len() {
+    return from
+      .iter()
+      .zip(to)
+      .map(|(from, to)| EitherOrBoth::Both(from, to))
+      .collect();
   }
-
-  // Hungarian algorithm requires #rows <= #columns
-  // Since the edit distance is symmetric, we can swap inputs if needed
-  let swapped = if from.len() > to.len() {
-    (to, from) = (from, to);
-    true
-  } else {
-    false
-  };
 
   // Pre-extract version components to avoid repetitive extraction
   let from_components: Vec<Vec<VersionComponent>> = from
@@ -109,42 +183,41 @@ pub fn match_version_amounts<'a>(
     })
     .collect();
 
-  let mut distances = Matrix::new(from.len(), to.len(), 0_i32);
+  let matchings = minimum_cost_ordered_matching(
+    from_components.len(),
+    to_components.len(),
+    |from_index, to_index| {
+      levenshtein(&from_components[from_index], &to_components[to_index])
+    },
+  );
 
-  // Compute all distances directly into the matrix
-  for i in 0..from.len() {
-    for j in 0..to.len() {
-      distances[(i, j)] =
-        i32::try_from(levenshtein(&from_components[i], &to_components[j]))
-          .unwrap_or(i32::MAX);
-    }
-  }
-
-  // Apply Hungarian algorithm to find optimal pairings
-  let (_cost, matchings) =
-    kuhn_munkres::kuhn_munkres_min::<i32, Matrix<i32>>(&distances);
-
-  // Process matched pairs
-  let mut remaining = (0..to.len()).collect::<HashSet<usize>>();
+  // Process matched pairs and retain the indexes left unmatched on either
+  // side. Only the longer side can have any, but tracking both keeps this code
+  // independent of whether the assignment matrix was transposed.
+  let mut matched_from = vec![false; from.len()];
+  let mut matched_to = vec![false; to.len()];
   let mut pairings =
     Vec::<EitherOrBoth<&VersionAmount>>::with_capacity(from.len() + to.len());
 
-  for (i, j) in matchings.into_iter().enumerate() {
-    pairings.push(EitherOrBoth::Both(&from[i], &to[j]));
-    remaining.remove(&j);
+  for (from_index, to_index) in matchings {
+    pairings.push(EitherOrBoth::Both(&from[from_index], &to[to_index]));
+    matched_from[from_index] = true;
+    matched_to[to_index] = true;
   }
 
-  // Add unmatched items from 'to' list
-  if !remaining.is_empty() {
-    let mut remaining = remaining.iter().map(|&j| &to[j]).collect::<Vec<_>>();
-    remaining.sort_unstable_by(|left, right| left.version.cmp(&right.version));
-    pairings.extend(remaining.into_iter().map(EitherOrBoth::Right));
-  }
-
-  // Restore original ordering if we swapped the inputs
-  if swapped {
-    pairings = pairings.into_iter().map(EitherOrBoth::flip).collect();
-  }
+  pairings.extend(
+    from
+      .iter()
+      .enumerate()
+      .filter(|(index, _)| !matched_from[*index])
+      .map(|(_, version)| EitherOrBoth::Left(version)),
+  );
+  pairings.extend(
+    to.iter()
+      .enumerate()
+      .filter(|(index, _)| !matched_to[*index])
+      .map(|(_, version)| EitherOrBoth::Right(version)),
+  );
 
   pairings
 }
@@ -163,6 +236,44 @@ mod tests {
 
   fn version_amount(version: &str) -> VersionAmount {
     VersionAmount::new(version, NonZeroUsize::MIN)
+  }
+
+  fn matching_cost(costs: &[Vec<usize>], matching: &[(usize, usize)]) -> usize {
+    matching
+      .iter()
+      .map(|&(row, column)| costs[row][column])
+      .sum()
+  }
+
+  fn ordered_matching(costs: &[Vec<usize>]) -> Vec<(usize, usize)> {
+    minimum_cost_ordered_matching(
+      costs.len(),
+      costs.first().map_or(0, Vec::len),
+      |row, column| costs[row][column],
+    )
+  }
+
+  fn brute_force_minimum_cost(
+    costs: &[Vec<usize>],
+    row: usize,
+    next_column: usize,
+    current_cost: usize,
+    minimum_cost: &mut usize,
+  ) {
+    if row == costs.len() {
+      *minimum_cost = min(*minimum_cost, current_cost);
+      return;
+    }
+
+    for column in next_column..costs[row].len() {
+      brute_force_minimum_cost(
+        costs,
+        row + 1,
+        column + 1,
+        current_cost + costs[row][column],
+        minimum_cost,
+      );
+    }
   }
 
   proptest! {
@@ -313,6 +424,58 @@ mod tests {
       3
     );
     assert_eq!(levenshtein(&[1, 2, 3], &[1, 2, 3, 4, 5]), 2);
+  }
+
+  #[test]
+  fn ordered_matching_preserves_order_when_crossing_is_cheaper() {
+    let costs = vec![vec![4, 1, 3], vec![2, 0, 5], vec![3, 2, 2]];
+
+    assert_eq!(ordered_matching(&costs), vec![(0, 0), (1, 1), (2, 2)]);
+  }
+
+  #[test]
+  fn ordered_matching_supports_wide_matrices() {
+    let costs = vec![vec![10, 1, 9], vec![8, 7, 2]];
+
+    assert_eq!(ordered_matching(&costs), vec![(0, 1), (1, 2)]);
+    assert!(ordered_matching(&[]).is_empty());
+  }
+
+  #[test]
+  fn ordered_matching_transposes_tall_matrices() {
+    let costs = vec![vec![10, 8], vec![1, 7], vec![9, 2]];
+
+    assert_eq!(ordered_matching(&costs), vec![(1, 0), (2, 1)]);
+  }
+
+  #[test]
+  fn ordered_matching_matches_exhaustive_search() {
+    // Exhaustively cover every 2x3 matrix whose costs are 0, 1, or 2.
+    for encoded_costs in 0..3_usize.pow(6) {
+      let mut encoded_costs = encoded_costs;
+      let mut costs = vec![vec![0; 3]; 2];
+      for row in &mut costs {
+        for cost in row {
+          *cost = encoded_costs % 3;
+          encoded_costs /= 3;
+        }
+      }
+
+      let matching = ordered_matching(&costs);
+      let mut exhaustive_cost = usize::MAX;
+      brute_force_minimum_cost(&costs, 0, 0, 0, &mut exhaustive_cost);
+
+      assert_eq!(matching_cost(&costs, &matching), exhaustive_cost);
+
+      let transposed = (0..3)
+        .map(|column| costs.iter().map(|row| row[column]).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+      let transposed_matching = ordered_matching(&transposed);
+      assert_eq!(
+        matching_cost(&transposed, &transposed_matching),
+        exhaustive_cost
+      );
+    }
   }
 
   #[test]
