@@ -3,7 +3,6 @@ use std::path::{
   PathBuf,
 };
 
-use derive_more::Deref;
 use eyre::{
   Context as _,
   ContextCompat as _,
@@ -46,8 +45,16 @@ pub use store::CommandBackend;
 /// A validated store path. Always starts with `/nix/store`.
 ///
 /// Can be created using `StorePath::try_from(path_buf)`.
-#[derive(Deref, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StorePath(PathBuf);
+
+impl std::ops::Deref for StorePath {
+  type Target = PathBuf;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
 
 impl TryFrom<PathBuf> for StorePath {
   type Error = Error;
