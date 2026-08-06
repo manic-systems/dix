@@ -180,8 +180,8 @@ fn write_path_stats(
     header = "PATHS".bold(),
     old = stats.old_count().red(),
     new = stats.new_count().green(),
-    added = Painted::new(added.as_str()).green(),
-    removed = Painted::new(removed.as_str()).red(),
+    added = Painted::new(added.as_str()).bright_cyan(),
+    removed = Painted::new(removed.as_str()).magenta(),
   )
 }
 
