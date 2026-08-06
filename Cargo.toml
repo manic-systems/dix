@@ -22,7 +22,6 @@ clap-verbosity-flag = "3.0.2"
 diff                = "0.1.13"
 eyre                = "0.6"
 itertools           = "0.15.0"
-pathfinding         = "4.14.0"
 proptest            = "1.6.0"
 rusqlite            = { default-features = false, features = [ "bundled", "cache" ], version = "0.40.0" }
 serde               = { features = [ "derive" ], version = "1.0.228" }
