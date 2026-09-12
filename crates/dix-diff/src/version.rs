@@ -158,7 +158,13 @@ fn component_rank(
     (_, None) => ComponentRank::Missing,
     (0, Some(true)) => ComponentRank::FirstNumeric,
     (0, Some(false)) => ComponentRank::FirstText,
-    (_, Some(false)) => ComponentRank::SuffixText,
+    (_, Some(false)) => {
+      if component == Some(VersionComponent("unstable")) {
+        ComponentRank::SuffixUnstable
+      } else {
+        ComponentRank::SuffixText
+      }
+    },
     (_, Some(true)) => ComponentRank::SuffixNumeric,
   }
 }
@@ -167,6 +173,7 @@ fn component_rank(
 enum ComponentRank {
   SuffixText,
   Missing,
+  SuffixUnstable,
   FirstNumeric,
   FirstText,
   SuffixNumeric,
@@ -500,6 +507,21 @@ mod tests {
     assert!(Version::new("1.0.0-beta") > Version::new("1.0.0-alpha"));
     assert!(Version::new("1.0.0-beta.11") > Version::new("1.0.0-beta.2"));
     assert_eq!(Version::new("1.0.0"), Version::new("1.0.0"));
+  }
+
+  #[test]
+  fn change_ordering_trats_unstable_as_newer() {
+    let old = Version::new("7.1.0");
+    let new = Version::new("7.1.0-unstable-2026-01-25");
+
+    assert_eq!(
+      old.change_ordering(&new),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less)
+    );
+    assert_eq!(
+      new.change_ordering(&old),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Greater)
+    );
   }
 
   #[test]
