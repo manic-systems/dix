@@ -34,53 +34,19 @@ use crate::{
 /// This is similar in implementation to the old `dix` in its early stages and
 /// is supposed to be a final fallback if the direct queries on the database
 /// fail. It is considerably slower than the direct queries.
-///
-/// The internal command use is configurable but is expected to be a drop-in
-/// replacement for the nix-store command.
 #[derive(Debug)]
-pub struct CommandBackend {
-  nix_store_cmd: String,
-  nix_cmd:       String,
-}
+pub struct CommandBackend;
 
 impl Display for CommandBackend {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(
-      f,
-      "CommandBackend(nix='{cmd}', nix-store='{store}')",
-      cmd = self.nix_cmd,
-      store = self.nix_store_cmd,
-    )
+    write!(f, "CommandBackend")
   }
 }
 
-impl Default for CommandBackend {
-  fn default() -> Self {
-    Self {
-      nix_store_cmd: "nix-store".to_owned(),
-      nix_cmd:       "nix".to_owned(),
-    }
-  }
-}
-
-impl CommandBackend {
-  #[must_use]
-  pub const fn new(cmd_nix_store: String, cmd_nix: String) -> Self {
-    Self {
-      nix_store_cmd: cmd_nix_store,
-      nix_cmd:       cmd_nix,
-    }
-  }
-
-  fn nix_store_command(&self) -> Command {
-    Command::new(&self.nix_store_cmd)
-  }
-
-  fn nix_command(&self, subcommand: &str) -> Command {
-    let mut command = Command::new(&self.nix_cmd);
-    command.arg(subcommand);
-    command
-  }
+fn nix_command(subcommand: &str) -> Command {
+  let mut command = Command::new("nix");
+  command.arg(subcommand);
+  command
 }
 
 fn parse_store_path_output(output: &Output) -> Result<Vec<StorePath>> {
@@ -135,8 +101,7 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
-    let output = self
-      .nix_store_command()
+    let output = Command::new("nix-store")
       .args(["--query", "--references"])
       .arg(system.join("sw"))
       .output()
@@ -154,8 +119,7 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
-    let output = self
-      .nix_store_command()
+    let output = Command::new("nix-store")
       .args(["--query", "--requisites"])
       .arg(path)
       .output()
@@ -173,8 +137,7 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
-    let output = self
-      .nix_command("path-info")
+    let output = nix_command("path-info")
       .args(["--recursive", "--size"])
       .arg(path)
       .output()
