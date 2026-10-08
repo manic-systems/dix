@@ -6,7 +6,7 @@ mod db;
 pub mod nix_command;
 mod queries;
 // Make the test db available for the rest of the crate.
-#[cfg(test)] pub(crate) mod test_utils;
+#[cfg(test)] pub mod test_utils;
 
 use std::{
   fmt::Display,

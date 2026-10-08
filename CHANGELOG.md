@@ -26,19 +26,15 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Diffing moved into the `diff` subcommand, so `dix <OLD> <NEW>`
   is now `dix diff <OLD> <NEW>`. Its options, like `--output`, belong to
   `diff`.
-- **Breaking:** Removed `CommandBackend::store_url(...)` and
-  `CommandBackend::env(...)`. They only existed for querying remote stores
-  over SSH, which `dix snapshot` replaces.
-- **Breaking:** `CommandBackend` is now a unit struct that always runs `nix`
-  and `nix-store`. `CommandBackend::new(...)` was removed.
 - **Breaking:** Removed `--force-correctness`; its behaviour is now the only
   one. dix never opens the Nix database with `?immutable=1`, and falls back
   to Nix commands instead. This drops the `force_correctness` parameter from
-  `query_diff_report`, `query_store_snapshot` and `json::display_diff`, as well
-  as `CombinedStoreBackend::{for_correctness, default_fast, default_correct}`
-  and `DATABASE_PATH_IMMUTABLE`.
-- **Breaking:** Removed `StoreBackend::query_dependents`, which was unused.
-- **Breaking:** Removed `StoreBackend::query_closure_size`, which was unused.
+  `query_diff_report`, `query_store_snapshot` and `json::display_diff`.
+- **Breaking:** The `store` module is now private, so `StoreBackend`,
+  `CombinedStoreBackend`, `DbConnection`, `CommandBackend` and
+  `query_store_snapshot_with_backend` are no longer public. `StorePathInfo` is
+  re-exported from the crate root. Remote stores were only reachable through
+  `CommandBackend::store_url(...)`, which `dix snapshot` replaces.
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are
   now always required.
 - Logs are now written to stderr instead of stdout.

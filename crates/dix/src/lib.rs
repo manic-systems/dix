@@ -40,10 +40,9 @@ pub use snapshot::{
   StoreSnapshot,
   query_snapshot_document,
   query_store_snapshot,
-  query_store_snapshot_with_backend,
 };
-pub mod store;
-pub use store::CommandBackend;
+mod store;
+pub use store::StorePathInfo;
 
 /// A validated store path. Always starts with `/nix/store`.
 ///
