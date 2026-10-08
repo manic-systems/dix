@@ -10,7 +10,7 @@ keywords     = [ "nix", "nixos" ]
 license      = "GPL-3.0-only"
 repository   = "https://github.com/faukah/dix"
 rust-version = "1.95.0"
-version      = "2.2.0"
+version      = "3.0.0"
 
 [workspace.dependencies]
 # Keep this exact: packaged `dix` resolves `dix-diff` from crates.io after Cargo
