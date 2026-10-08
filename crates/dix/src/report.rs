@@ -408,24 +408,19 @@ struct ParsedStorePath {
 pub fn query_diff_report(
   path_old: &Path,
   path_new: &Path,
-  force_correctness: bool,
 ) -> Result<DiffReport> {
   tracing::debug!(
     old_path = %path_old.display(),
     new_path = %path_new.display(),
-    force_correctness = force_correctness,
     "starting diff report computation"
   );
 
-  let (old, new) = CombinedStoreBackend::query_with_correctness(
-    force_correctness,
-    |backend| {
-      Ok((
-        query_store_snapshot_with_backend(backend, path_old)?,
-        query_store_snapshot_with_backend(backend, path_new)?,
-      ))
-    },
-  )?;
+  let (old, new) = CombinedStoreBackend::query_default(|backend| {
+    Ok((
+      query_store_snapshot_with_backend(backend, path_old)?,
+      query_store_snapshot_with_backend(backend, path_new)?,
+    ))
+  })?;
   let report = diff_store_snapshots(&old, &new);
   let path_stats = report.path_stats();
 

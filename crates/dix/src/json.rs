@@ -26,12 +26,8 @@ use crate::{
 /// # Errors
 ///
 /// Returns an error if querying the diff report or writing JSON fails.
-pub fn display_diff(
-  path_old: &Path,
-  path_new: &Path,
-  force_correctness: bool,
-) -> Result<()> {
-  let report = query_diff_report(path_old, path_new, force_correctness)?;
+pub fn display_diff(path_old: &Path, path_new: &Path) -> Result<()> {
+  let report = query_diff_report(path_old, path_new)?;
   generate_diff(&mut std::io::stdout(), &report)
 }
 

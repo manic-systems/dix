@@ -55,18 +55,6 @@ enum Command {
     old_path: PathBuf,
     new_path: PathBuf,
 
-    /// Fall back to a backend chain that skips `SQLite` immutable mode.
-    ///
-    /// This is relevant if the output of dix is to be used for more
-    /// critical applications and not just as human-readable overview.
-    ///
-    /// The default backend falls back to opening Nix's `SQLite` database with
-    /// `?immutable=1` if the normal connection fails. That is faster than Nix
-    /// commands, but can be inaccurate if the database is being written to at
-    /// the same time.
-    #[arg(long, default_value_t = false)]
-    force_correctness: bool,
-
     /// Select the output format to use.
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     output: OutputFormat,
@@ -130,9 +118,8 @@ fn main() -> eyre::Result<()> {
     Command::Diff {
       old_path,
       new_path,
-      force_correctness,
       output,
-    } => print_diff(&old_path, &new_path, output, force_correctness),
+    } => print_diff(&old_path, &new_path, output),
     Command::Snapshot { path } => print_snapshot(&path),
   }
 }
@@ -149,7 +136,6 @@ fn print_diff(
   old_path: &Path,
   new_path: &Path,
   output: OutputFormat,
-  force_correctness: bool,
 ) -> eyre::Result<()> {
   for (name, path) in [("old", old_path), ("new", new_path)] {
     if !path.exists() {
@@ -162,25 +148,13 @@ fn print_diff(
 
   tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
 
-  if force_correctness {
-    tracing::warn!(
-      "Falling back to slower but more robust backends (force_correctness is \
-       set)."
-    );
-  }
   match output {
-    OutputFormat::Human => display_diff(old_path, new_path, force_correctness),
-    OutputFormat::Json => {
-      json::display_diff(old_path, new_path, force_correctness)
-    },
+    OutputFormat::Human => display_diff(old_path, new_path),
+    OutputFormat::Json => json::display_diff(old_path, new_path),
   }
 }
 
-fn display_diff(
-  old_path: &Path,
-  new_path: &Path,
-  force_correctness: bool,
-) -> eyre::Result<()> {
+fn display_diff(old_path: &Path, new_path: &Path) -> eyre::Result<()> {
   let mut out = WriteFmt(io::stdout());
 
   tracing::info!("starting diff computation");
@@ -202,7 +176,7 @@ fn display_diff(
       .display(),
   )?;
 
-  let report = dix::query_diff_report(old_path, new_path, force_correctness)?;
+  let report = dix::query_diff_report(old_path, new_path)?;
   dix::write_diff_report(&mut out, &report)?;
 
   tracing::info!("diff computation complete");
@@ -245,10 +219,9 @@ mod tests {
   fn diff_subcommand_parses() {
     let cli = Cli::try_parse_from(["dix", "diff", "/old", "/new"]).unwrap();
     assert_eq!(cli.command, Command::Diff {
-      old_path:          PathBuf::from("/old"),
-      new_path:          PathBuf::from("/new"),
-      force_correctness: false,
-      output:            OutputFormat::Human,
+      old_path: PathBuf::from("/old"),
+      new_path: PathBuf::from("/new"),
+      output:   OutputFormat::Human,
     });
   }
 

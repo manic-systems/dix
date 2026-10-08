@@ -30,11 +30,8 @@ pub struct StoreSnapshot {
 /// # Errors
 ///
 /// Returns an error if the store connection or path queries fail.
-pub fn query_store_snapshot(
-  path: &Path,
-  force_correctness: bool,
-) -> Result<StoreSnapshot> {
-  CombinedStoreBackend::query_with_correctness(force_correctness, |backend| {
+pub fn query_store_snapshot(path: &Path) -> Result<StoreSnapshot> {
+  CombinedStoreBackend::query_default(|backend| {
     query_store_snapshot_with_backend(backend, path)
   })
 }
@@ -124,9 +121,6 @@ impl SnapshotDocument {
 
 /// Canonicalizes `path` and queries a [`SnapshotDocument`] for it.
 ///
-/// Always uses the correctness-focused backend chain, since snapshots are
-/// meant to be consumed by other programs.
-///
 /// # Errors
 ///
 /// Returns an error if the path cannot be canonicalized, does not resolve to
@@ -136,7 +130,7 @@ pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
     format!("failed to canonicalize path '{}'", path.display())
   })?;
   let store_path = StorePath::try_from(canonical)?;
-  let snapshot = query_store_snapshot(&store_path, true)?;
+  let snapshot = query_store_snapshot(&store_path)?;
   Ok(SnapshotDocument::new(store_path, snapshot))
 }
 
