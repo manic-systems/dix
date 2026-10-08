@@ -15,8 +15,9 @@ Diff Nix
 Usage: dix [OPTIONS] <COMMAND>
 
 Commands:
-  diff  Show the differences between two store paths
-  help  Print this message or the help of the given subcommand(s)
+  diff      Show the differences between two store paths
+  snapshot  Print the closure of a store path as a versioned JSON snapshot
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
   -v, --verbose...    Increase logging verbosity
@@ -27,6 +28,28 @@ Options:
 
 $ dix diff /nix/var/profiles/system-69-link /run/current-system
 ```
+
+# Snapshots
+
+`dix snapshot <PATH>` prints the closure of a store path as JSON, so it can be
+diffed on another machine. [nh](https://github.com/nix-community/nh) uses this
+to diff deployments to remote hosts, which requires dix on the target host.
+
+```json
+{
+  "version": 1,
+  "path": "/nix/store/<hash>-nixos-system-...",
+  "closure": [{ "path": "/nix/store/<hash>-bash-5.2.15", "narSize": 5000000 }],
+  "selected": ["/nix/store/<hash>-bash-5.2.15"]
+}
+```
+
+- `version` is the format version. It is bumped on incompatible changes.
+- `path` is the canonical store path, with symlinks resolved.
+- `closure` lists every path in the closure with its NAR size in bytes.
+- `selected` lists the packages selected by a NixOS system's `system-path`.
+
+Snapshots always use the correctness-focused store backends.
 
 # Usage in CI
 

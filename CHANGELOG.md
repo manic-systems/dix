@@ -8,6 +8,14 @@ This is a changelog of the `dix` repository. It follows the
 
 ### Added
 
+- Added the `dix snapshot <PATH>` subcommand, which prints the closure of a
+  store path as a versioned JSON `SnapshotDocument`. This lets the closure be
+  captured on one machine (e.g. a remote deployment target) and diffed on
+  another.
+- `StorePath`, `StorePathInfo` and `StoreSnapshot` now implement
+  `Serialize`/`Deserialize`. `SnapshotDocument::from_json` rejects unknown
+  format versions before parsing anything else.
+
 ### Fixed
 
 - Querying a path that is not a valid store path, e.g. one that exists on disk
@@ -16,8 +24,11 @@ This is a changelog of the `dix` repository. It follows the
 ### Changed
 
 - **Breaking:** Diffing moved into the `diff` subcommand, so `dix <OLD> <NEW>`
-  is now `dix diff <OLD> <NEW>`. `--force-correctness` and `--output` are
-  options of `diff`.
+  is now `dix diff <OLD> <NEW>`. Its options, like `--output`, belong to
+  `diff`.
+- **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are now always
+  required.
+- Logs are now written to stderr instead of stdout.
 
 ## 2.2.0
 

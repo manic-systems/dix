@@ -182,7 +182,7 @@ impl DiffReport {
     self.size_new
   }
 
-  #[cfg(all(test, feature = "json"))]
+  #[cfg(test)]
   pub(crate) const fn new_for_test(
     diffs: Vec<PackageDiff>,
     path_stats: PathStats,

@@ -8,6 +8,7 @@ use std::{
   io::{
     self,
     IsTerminal as _,
+    Write as _,
   },
   path::{
     Path,
@@ -16,7 +17,7 @@ use std::{
 };
 
 use clap::Parser as _;
-#[cfg(feature = "json")] use dix::json;
+use dix::json;
 use eyre::eyre;
 use yansi::Paint as _;
 
@@ -47,7 +48,7 @@ struct Cli {
   color: clap::ColorChoice,
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(clap::Subcommand, Debug, PartialEq, Eq)]
 enum Command {
   /// Show the differences between two store paths.
   Diff {
@@ -70,14 +71,16 @@ enum Command {
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     output: OutputFormat,
   },
+  /// Print the closure of a store path as a versioned JSON snapshot.
+  Snapshot { path: PathBuf },
 }
 
 /// Determines the output format to be used by dix.
-#[derive(Debug, Clone, clap::ValueEnum, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum, Eq, PartialEq)]
 enum OutputFormat {
   /// Output in the default dix format highlighting version changes.
   Human,
-  /// Display the output as JSON for machine parsing (requires `json` feature).
+  /// Display the output as JSON for machine parsing.
   Json,
 }
 
@@ -87,37 +90,6 @@ fn main() -> eyre::Result<()> {
     verbose,
     color,
   } = Cli::parse();
-  let Command::Diff {
-    old_path,
-    new_path,
-    force_correctness,
-    output,
-  } = command;
-
-  tracing::debug!(
-    old_path = %old_path.display(),
-    new_path = %new_path.display(),
-    force_correctness = force_correctness,
-    "starting dix"
-  );
-
-  // Validate that both paths exist before proceeding
-  if !old_path.exists() {
-    tracing::error!(path = %old_path.display(), "old profile path does not exist");
-    return Err(eyre!(
-      "old profile path does not exist: {}",
-      old_path.display()
-    ));
-  }
-  if !new_path.exists() {
-    tracing::error!(path = %new_path.display(), "new profile path does not exist");
-    return Err(eyre!(
-      "new profile path does not exist: {}",
-      new_path.display()
-    ));
-  }
-
-  tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
 
   yansi::whenever(match color {
     clap::ColorChoice::Auto => yansi::Condition::from(should_style),
@@ -148,10 +120,46 @@ fn main() -> eyre::Result<()> {
         })
         .from_env_lossy(),
     )
+    .with_writer(io::stderr)
     .with_ansi(should_style())
     .with_target(false)
     .without_time()
     .init();
+
+  match command {
+    Command::Diff {
+      old_path,
+      new_path,
+      force_correctness,
+      output,
+    } => print_diff(&old_path, &new_path, output, force_correctness),
+    Command::Snapshot { path } => print_snapshot(&path),
+  }
+}
+
+fn print_snapshot(path: &Path) -> eyre::Result<()> {
+  let mut out = io::stdout().lock();
+  dix::query_snapshot_document(path)?.write_json(&mut out)?;
+  writeln!(out)?;
+  Ok(())
+}
+
+fn print_diff(
+  old_path: &Path,
+  new_path: &Path,
+  output: OutputFormat,
+  force_correctness: bool,
+) -> eyre::Result<()> {
+  for (name, path) in [("old", old_path), ("new", new_path)] {
+    if !path.exists() {
+      return Err(eyre!(
+        "{name} profile path does not exist: {}",
+        path.display()
+      ));
+    }
+  }
+
+  tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
 
   if force_correctness {
     tracing::warn!(
@@ -160,22 +168,11 @@ fn main() -> eyre::Result<()> {
     );
   }
   match output {
-    OutputFormat::Human => {
-      display_diff(&old_path, &new_path, force_correctness)?;
-    },
-    #[cfg(feature = "json")]
+    OutputFormat::Human => display_diff(old_path, new_path, force_correctness),
     OutputFormat::Json => {
-      json::display_diff(&old_path, &new_path, force_correctness)?;
-    },
-    #[cfg(not(feature = "json"))]
-    OutputFormat::Json => {
-      return Err(eyre!(
-        "The 'json' feature is required to use '--json-output'."
-      ));
+      json::display_diff(old_path, new_path, force_correctness)
     },
   }
-
-  Ok(())
 }
 
 fn display_diff(
@@ -246,15 +243,25 @@ mod tests {
   #[test]
   fn diff_subcommand_parses() {
     let cli = Cli::try_parse_from(["dix", "diff", "/old", "/new"]).unwrap();
-    let Command::Diff {
-      old_path, new_path, ..
-    } = cli.command;
-    assert_eq!(old_path, PathBuf::from("/old"));
-    assert_eq!(new_path, PathBuf::from("/new"));
+    assert_eq!(cli.command, Command::Diff {
+      old_path:          PathBuf::from("/old"),
+      new_path:          PathBuf::from("/new"),
+      force_correctness: false,
+      output:            OutputFormat::Human,
+    });
   }
 
   #[test]
   fn bare_paths_are_rejected() {
     assert!(Cli::try_parse_from(["dix", "/old", "/new"]).is_err());
+  }
+
+  #[test]
+  fn snapshot_subcommand_parses() {
+    let cli =
+      Cli::try_parse_from(["dix", "snapshot", "/run/current-system"]).unwrap();
+    assert_eq!(cli.command, Command::Snapshot {
+      path: PathBuf::from("/run/current-system"),
+    });
   }
 }

@@ -19,8 +19,8 @@ diff                = { workspace = true }
 eyre                = { workspace = true }
 itertools           = { workspace = true }
 rusqlite            = { workspace = true }
-serde               = { optional = true, workspace = true }
-serde_json          = { optional = true, workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
 size                = { workspace = true }
 tracing             = { workspace = true }
 tracing-subscriber  = { workspace = true }
@@ -30,10 +30,6 @@ yansi               = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }
-
-[features]
-default = [ "json" ]
-json    = [ "dep:serde", "dep:serde_json" ]
 
 [lints]
 workspace = true
