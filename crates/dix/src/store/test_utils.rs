@@ -5,12 +5,29 @@
 
 use std::{
   fs,
-  path::PathBuf,
+  path::{
+    Path,
+    PathBuf,
+  },
 };
 
 use eyre::Result;
 use rusqlite::Connection;
+use size::Size;
 use tempfile::TempDir;
+
+use crate::store::StoreBackend;
+
+/// Sums the NAR sizes of the closure of `path`.
+pub fn closure_size(backend: &dyn StoreBackend, path: &Path) -> Result<Size> {
+  Ok(Size::from_bytes(
+    backend
+      .query_closure_path_info(path)?
+      .iter()
+      .map(|info| info.nar_size().bytes())
+      .sum::<i64>(),
+  ))
+}
 
 /// Test database builder for creating temporary `SQLite` databases
 /// with the Nix store schema.
@@ -354,13 +371,8 @@ pub mod edge_cases {
 
 #[cfg(test)]
 mod tests {
-  use size::Size;
-
   use super::*;
-  use crate::store::{
-    DbConnection,
-    StoreBackend,
-  };
+  use crate::store::DbConnection;
 
   #[test]
   fn test_db_builder_creation() {
@@ -403,7 +415,7 @@ mod tests {
     let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
     assert!(conn.connected());
-    let size = conn.query_closure_size(&root).unwrap();
+    let size = closure_size(&conn, &root).unwrap();
     assert_eq!(size, Size::from_bytes(200)); // 100 + 50 + 50
     conn.close().unwrap();
     assert!(!conn.connected());
@@ -447,7 +459,7 @@ mod tests {
   }
 
   #[test]
-  fn test_db_query_closure_of_diamond() {
+  fn test_db_query_dependents() {
     let db = create_diamond_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let a_fixture = fixtures::store_path("package-a");
@@ -483,7 +495,7 @@ mod tests {
 
     let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
-    let size = conn.query_closure_size(&path).unwrap();
+    let size = closure_size(&conn, &path).unwrap();
     assert_eq!(size, Size::from_bytes(500));
     conn.close().unwrap();
   }
@@ -499,7 +511,7 @@ mod tests {
       let path = db.resolve_fixture_path(&fixtures::store_path(&format!(
         "circular-{letter}"
       )));
-      let size = conn.query_closure_size(&path).unwrap();
+      let size = closure_size(&conn, &path).unwrap();
       assert_eq!(
         size,
         Size::from_bytes(300),
@@ -517,7 +529,7 @@ mod tests {
 
     let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
-    let size = conn.query_closure_size(&path).unwrap();
+    let size = closure_size(&conn, &path).unwrap();
     assert_eq!(size, Size::from_bytes(6000)); // 1000 + 100*50
 
     let closure = conn.query_closure_path_info(&path).unwrap();
@@ -533,7 +545,7 @@ mod tests {
 
     let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
-    let size = conn.query_closure_size(&path).unwrap();
+    let size = closure_size(&conn, &path).unwrap();
     assert_eq!(size, Size::from_bytes(10000)); // 100 * 100
 
     let closure = conn.query_closure_path_info(&path).unwrap();

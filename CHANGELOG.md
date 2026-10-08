@@ -31,9 +31,6 @@ This is a changelog of the `dix` repository. It follows the
   over SSH, which `dix snapshot` replaces.
 - **Breaking:** `CommandBackend` is now a unit struct that always runs `nix`
   and `nix-store`. `CommandBackend::new(...)` was removed.
-- **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are now always
-  required.
-- Logs are now written to stderr instead of stdout.
 - **Breaking:** Removed `--force-correctness`; its behaviour is now the only
   one. dix never opens the Nix database with `?immutable=1`, and falls back
   to Nix commands instead. This drops the `force_correctness` parameter from
@@ -41,6 +38,10 @@ This is a changelog of the `dix` repository. It follows the
   as `CombinedStoreBackend::{for_correctness, default_fast, default_correct}`
   and `DATABASE_PATH_IMMUTABLE`.
 - **Breaking:** Removed `StoreBackend::query_dependents`, which was unused.
+- **Breaking:** Removed `StoreBackend::query_closure_size`, which was unused.
+- **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are
+  now always required.
+- Logs are now written to stderr instead of stdout.
 
 ## 2.2.0
 
