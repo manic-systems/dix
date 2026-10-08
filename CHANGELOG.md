@@ -26,6 +26,9 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Diffing moved into the `diff` subcommand, so `dix <OLD> <NEW>`
   is now `dix diff <OLD> <NEW>`. Its options, like `--output`, belong to
   `diff`.
+- **Breaking:** Removed `CommandBackend::store_url(...)` and
+  `CommandBackend::env(...)`. They only existed for querying remote stores
+  over SSH, which `dix snapshot` replaces.
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are now always
   required.
 - Logs are now written to stderr instead of stdout.
