@@ -7,10 +7,7 @@ use std::{
     Path,
     PathBuf,
   },
-  process::{
-    Command,
-    Output,
-  },
+  process::Command,
 };
 
 use eyre::{
@@ -43,14 +40,25 @@ impl Display for CommandBackend {
   }
 }
 
-fn nix_command(subcommand: &str) -> Command {
-  let mut command = Command::new("nix");
-  command.arg(subcommand);
-  command
+/// Runs a Nix command and returns its stdout.
+fn run(command: &mut Command) -> Result<String> {
+  let output = command
+    .output()
+    .wrap_err_with(|| format!("failed to execute {command:?}"))?;
+  if !output.status.success() {
+    bail!(
+      "{command:?} exited with {status}: {err}",
+      status = output.status,
+      err = String::from_utf8_lossy(&output.stderr).trim()
+    );
+  }
+
+  String::from_utf8(output.stdout)
+    .wrap_err_with(|| format!("{command:?} printed invalid UTF-8"))
 }
 
-fn parse_store_path_output(output: &Output) -> Result<Vec<StorePath>> {
-  str::from_utf8(&output.stdout)?
+fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
+  output
     .lines()
     .map(|line| {
       StorePath::try_from(PathBuf::from(line)).context(eyre!(
@@ -60,10 +68,9 @@ fn parse_store_path_output(output: &Output) -> Result<Vec<StorePath>> {
     .collect()
 }
 
-fn parse_path_info_size_output(output: &Output) -> Result<Vec<StorePathInfo>> {
-  let text = str::from_utf8(&output.stdout)?;
+fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
   let mut infos = Vec::new();
-  for line in text.lines() {
+  for line in output.lines() {
     let mut columns = line.split_whitespace();
     let path = columns
       .next()
@@ -101,78 +108,38 @@ impl StoreBackend for CommandBackend {
   }
 
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
-    let output = Command::new("nix-store")
-      .args(["--query", "--references"])
-      .arg(system.join("sw"))
-      .output()
-      .wrap_err("Encountered error while executing nix-store command")?;
-    if !output.status.success() {
-      let stderr = String::from_utf8_lossy(&output.stderr);
-      bail!(
-        "nix-store command exited with non-zero status {status}: {err}",
-        status = output.status,
-        err = stderr.trim()
-      );
-    }
-
-    parse_store_path_output(&output)
+    parse_store_path_output(&run(
+      Command::new("nix-store")
+        .args(["--query", "--references"])
+        .arg(system.join("sw")),
+    )?)
   }
 
   fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
-    let output = Command::new("nix-store")
-      .args(["--query", "--requisites"])
-      .arg(path)
-      .output()
-      .wrap_err("Encountered error while executing nix-store command")?;
-    if !output.status.success() {
-      let stderr = String::from_utf8_lossy(&output.stderr);
-      bail!(
-        "nix-store command exited with non-zero status {status}: {err}",
-        status = output.status,
-        err = stderr.trim()
-      );
-    }
-
-    parse_store_path_output(&output)
+    parse_store_path_output(&run(
+      Command::new("nix-store")
+        .args(["--query", "--requisites"])
+        .arg(path),
+    )?)
   }
 
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
-    let output = nix_command("path-info")
-      .args(["--recursive", "--size"])
-      .arg(path)
-      .output()
-      .wrap_err("Encountered error while executing nix command")?;
-    if !output.status.success() {
-      let stderr = String::from_utf8_lossy(&output.stderr);
-      bail!(
-        "nix command exited with non-zero status {status}: {err}",
-        status = output.status,
-        err = stderr.trim()
-      );
-    }
-
-    parse_path_info_size_output(&output)
+    parse_path_info_size_output(&run(
+      Command::new("nix")
+        .args(["path-info", "--recursive", "--size"])
+        .arg(path),
+    )?)
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use std::os::unix::process::ExitStatusExt;
-
   use super::*;
 
   const FAKE_PATHS: &str = "\
 /nix/store/0j3jwpcy0r9fk8ymmknq7d5bkjwg6kr3-gcc-15.2.0-lib
 /nix/store/0j7cqjjjrx3dm875bpkwq8sqhc4c480f-sparklines-1.7-tex
 /nix/store/0j8ydh92l9hdjibg5d24nasxzha9ibvr-mbedtls-3.6.5";
-
-  fn mock_output(stdout: impl Into<Vec<u8>>) -> Output {
-    Output {
-      status: ExitStatusExt::from_raw(0),
-      stdout: stdout.into(),
-      stderr: Vec::new(),
-    }
-  }
 
   fn path_info_output() -> String {
     FAKE_PATHS
@@ -185,7 +152,7 @@ mod tests {
 
   #[test]
   fn parse_store_path_output_reads_paths() {
-    let mut paths = parse_store_path_output(&mock_output(FAKE_PATHS)).unwrap();
+    let mut paths = parse_store_path_output(FAKE_PATHS).unwrap();
     paths.sort();
     let mut expected = FAKE_PATHS
       .lines()
@@ -198,8 +165,7 @@ mod tests {
 
   #[test]
   fn parse_path_info_size_output_reads_nar_sizes() {
-    let info =
-      parse_path_info_size_output(&mock_output(path_info_output())).unwrap();
+    let info = parse_path_info_size_output(&path_info_output()).unwrap();
     assert_eq!(info.len(), FAKE_PATHS.lines().count());
     assert_eq!(info[0].nar_size(), Size::from_bytes(1));
     assert_eq!(info[2].nar_size(), Size::from_bytes(3));
