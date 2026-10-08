@@ -40,6 +40,7 @@ This is a changelog of the `dix` repository. It follows the
   `query_diff_report`, `query_store_snapshot` and `json::display_diff`, as well
   as `CombinedStoreBackend::{for_correctness, default_fast, default_correct}`
   and `DATABASE_PATH_IMMUTABLE`.
+- **Breaking:** Removed `StoreBackend::query_dependents`, which was unused.
 
 ## 2.2.0
 

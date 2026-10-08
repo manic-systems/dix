@@ -1,16 +1,3 @@
-pub const QUERY_DEPENDENTS: &str = "
-      WITH RECURSIVE
-        graph(p) AS (
-          SELECT id
-          FROM ValidPaths
-          WHERE path = ?
-        UNION
-          SELECT reference FROM Refs
-          JOIN graph ON referrer = p
-        )
-      SELECT path from graph
-      JOIN ValidPaths ON id = p;
-    ";
 pub const QUERY_SYSTEM_DERIVATIONS: &str = "
       WITH
         systemderiv AS (

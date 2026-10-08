@@ -122,12 +122,6 @@ pub trait StoreBackend: Display {
   ///
   /// Returns an error if the backend query fails.
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>>;
-  /// Queries all dependencies of a store path.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the backend query fails.
-  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>>;
   /// Queries all dependencies of a store path with their NAR sizes.
   ///
   /// # Errors
@@ -307,10 +301,6 @@ impl StoreBackend for CombinedStoreBackend {
     )
   }
 
-  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
-    self.fallback_query(|backend, path| backend.query_dependents(path), path)
-  }
-
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
     self.fallback_query(
       |backend, path| backend.query_closure_path_info(path),
@@ -385,15 +375,6 @@ mod test {
       }
     }
 
-    fn query_dependents(&self, _path: &Path) -> Result<Vec<StorePath>> {
-      *self.query_called.borrow_mut() = true;
-      if self.fail_query {
-        Err(eyre!("Query failed"))
-      } else {
-        Ok(Vec::new())
-      }
-    }
-
     fn query_closure_path_info(
       &self,
       _path: &Path,
@@ -454,7 +435,7 @@ mod test {
 
     combined.connect().unwrap();
 
-    let res = combined.query_dependents(Path::new("/dummy"));
+    let res = combined.query_system_derivations(Path::new("/dummy"));
     assert!(res.is_ok());
     assert_eq!(res.unwrap(), Vec::new());
   }
