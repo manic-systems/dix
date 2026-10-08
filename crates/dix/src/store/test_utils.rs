@@ -447,7 +447,7 @@ mod tests {
   }
 
   #[test]
-  fn test_db_query_dependents() {
+  fn test_db_query_closure_of_diamond() {
     let db = create_diamond_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let a_fixture = fixtures::store_path("package-a");
@@ -455,8 +455,8 @@ mod tests {
 
     let mut conn = DbConnection::new(&db_path);
     conn.connect().unwrap();
-    let dependents = conn.query_dependents(&a).unwrap();
-    assert_eq!(dependents.len(), 4);
+    let closure = conn.query_closure_path_info(&a).unwrap();
+    assert_eq!(closure.len(), 4);
     conn.close().unwrap();
   }
 
@@ -520,8 +520,8 @@ mod tests {
     let size = conn.query_closure_size(&path).unwrap();
     assert_eq!(size, Size::from_bytes(6000)); // 1000 + 100*50
 
-    let dependents = conn.query_dependents(&path).unwrap();
-    assert_eq!(dependents.len(), 101); // root + 100 children
+    let closure = conn.query_closure_path_info(&path).unwrap();
+    assert_eq!(closure.len(), 101); // root + 100 children
     conn.close().unwrap();
   }
 
@@ -536,8 +536,8 @@ mod tests {
     let size = conn.query_closure_size(&path).unwrap();
     assert_eq!(size, Size::from_bytes(10000)); // 100 * 100
 
-    let dependents = conn.query_dependents(&path).unwrap();
-    assert_eq!(dependents.len(), 100);
+    let closure = conn.query_closure_path_info(&path).unwrap();
+    assert_eq!(closure.len(), 100);
     conn.close().unwrap();
   }
 }

@@ -84,10 +84,6 @@ impl StoreBackend for DbConnection {
     )
   }
 
-  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
-    query_store_paths(self.get_inner()?, queries::QUERY_DEPENDENTS, path)
-  }
-
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
     query_store_path_info(self.get_inner()?, path)
   }

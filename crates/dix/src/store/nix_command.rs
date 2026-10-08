@@ -115,14 +115,6 @@ impl StoreBackend for CommandBackend {
     )?)
   }
 
-  fn query_dependents(&self, path: &Path) -> Result<Vec<StorePath>> {
-    parse_store_path_output(&run(
-      Command::new("nix-store")
-        .args(["--query", "--requisites"])
-        .arg(path),
-    )?)
-  }
-
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
     parse_path_info_size_output(&run(
       Command::new("nix")
