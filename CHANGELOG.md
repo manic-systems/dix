@@ -29,6 +29,8 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Removed `CommandBackend::store_url(...)` and
   `CommandBackend::env(...)`. They only existed for querying remote stores
   over SSH, which `dix snapshot` replaces.
+- **Breaking:** `CommandBackend` is now a unit struct that always runs `nix`
+  and `nix-store`. `CommandBackend::new(...)` was removed.
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are now always
   required.
 - Logs are now written to stderr instead of stdout.

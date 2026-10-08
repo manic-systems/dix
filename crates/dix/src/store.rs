@@ -197,7 +197,7 @@ impl CombinedStoreBackend {
     Self::new(vec![
       Box::new(DbConnection::new(DATABASE_PATH)),
       Box::new(DbConnection::new(DATABASE_PATH_IMMUTABLE)),
-      Box::new(CommandBackend::default()),
+      Box::new(CommandBackend),
     ])
   }
 
@@ -211,7 +211,7 @@ impl CombinedStoreBackend {
   pub fn default_correct() -> Self {
     Self::new(vec![
       Box::new(DbConnection::new(DATABASE_PATH)),
-      Box::new(CommandBackend::default()),
+      Box::new(CommandBackend),
     ])
   }
 
