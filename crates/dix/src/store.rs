@@ -102,20 +102,6 @@ pub trait StoreBackend: Display {
   ///
   /// Returns an error if resources cannot be closed cleanly.
   fn close(&mut self) -> Result<()>;
-  /// Queries the closure size for a Nix store path.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the backend query fails or the size cannot be read.
-  fn query_closure_size(&self, path: &Path) -> Result<Size> {
-    Ok(Size::from_bytes(
-      self
-        .query_closure_path_info(path)?
-        .iter()
-        .map(|info| info.nar_size().bytes())
-        .sum::<i64>(),
-    ))
-  }
   /// Queries derivations selected by a system profile.
   ///
   /// # Errors
@@ -422,7 +408,7 @@ mod test {
 
     combined.connect().unwrap();
 
-    let res = combined.query_closure_size(Path::new("/dummy"));
+    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
     assert!(res.is_ok());
     assert_eq!(res.unwrap(), Size::from_bytes(100));
   }
@@ -448,7 +434,7 @@ mod test {
 
     combined.connect().unwrap(); // f1 fails, f2 succeeds
 
-    let res = combined.query_closure_size(Path::new("/dummy"));
+    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
     assert!(res.is_ok());
     assert_eq!(res.unwrap(), Size::from_bytes(100));
 
@@ -458,7 +444,7 @@ mod test {
     let mut combined = CombinedStoreBackend::new(vec![f1, f2, f3]);
     combined.connect().unwrap();
 
-    let res = combined.query_closure_size(Path::new("/dummy"));
+    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
     assert_eq!(res.unwrap(), Size::from_bytes(100));
     assert!(combined.connect().is_ok());
     assert!(combined.connected());
@@ -472,7 +458,7 @@ mod test {
 
     combined.connect().unwrap();
 
-    let res = combined.query_closure_size(Path::new("/dummy"));
+    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
     assert!(res.is_err());
   }
 }
