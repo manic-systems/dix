@@ -138,8 +138,9 @@ fn main() -> eyre::Result<()> {
 }
 
 fn print_snapshot(path: &Path) -> eyre::Result<()> {
+  let document = dix::query_snapshot_document(path)?;
   let mut out = io::stdout().lock();
-  dix::query_snapshot_document(path)?.write_json(&mut out)?;
+  serde_json::to_writer(&mut out, &document)?;
   writeln!(out)?;
   Ok(())
 }
