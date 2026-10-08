@@ -19,6 +19,10 @@ use eyre::{
   eyre,
 };
 pub use nix_command::CommandBackend;
+use serde::{
+  Deserialize,
+  Serialize,
+};
 use size::Size;
 use tracing::warn;
 
@@ -35,10 +39,39 @@ pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 pub const DATABASE_PATH_IMMUTABLE: &str =
   "file:/nix/var/nix/db/db.sqlite?immutable=1";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorePathInfo {
   path:     StorePath,
+  #[serde(with = "size_bytes")]
   nar_size: Size,
+}
+
+/// (De)serializes a [`Size`] as a plain byte count.
+mod size_bytes {
+  use serde::{
+    Deserialize as _,
+    Deserializer,
+    Serializer,
+  };
+  use size::Size;
+
+  #[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "signature required by `serde(with)`"
+  )]
+  pub fn serialize<S: Serializer>(
+    size: &Size,
+    serializer: S,
+  ) -> Result<S::Ok, S::Error> {
+    serializer.serialize_i64(size.bytes())
+  }
+
+  pub fn deserialize<'de, D: Deserializer<'de>>(
+    deserializer: D,
+  ) -> Result<Size, D::Error> {
+    i64::deserialize(deserializer).map(Size::from_bytes)
+  }
 }
 
 impl StorePathInfo {

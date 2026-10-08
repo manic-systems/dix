@@ -12,7 +12,7 @@ use eyre::{
   eyre,
 };
 
-#[cfg(feature = "json")] pub mod json;
+pub mod json;
 
 pub use dix_diff::{
   DiffStatus,
@@ -35,7 +35,10 @@ pub use report::{
 
 pub mod snapshot;
 pub use snapshot::{
+  SNAPSHOT_FORMAT_VERSION,
+  SnapshotDocument,
   StoreSnapshot,
+  query_snapshot_document,
   query_store_snapshot,
   query_store_snapshot_with_backend,
 };
@@ -45,8 +48,25 @@ pub use store::CommandBackend;
 /// A validated store path. Always starts with `/nix/store`.
 ///
 /// Can be created using `StorePath::try_from(path_buf)`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+  Debug,
+  Clone,
+  PartialEq,
+  Eq,
+  Hash,
+  PartialOrd,
+  Ord,
+  serde::Serialize,
+  serde::Deserialize,
+)]
+#[serde(try_from = "PathBuf", into = "PathBuf")]
 pub struct StorePath(PathBuf);
+
+impl From<StorePath> for PathBuf {
+  fn from(path: StorePath) -> Self {
+    path.0
+  }
+}
 
 impl std::ops::Deref for StorePath {
   type Target = PathBuf;
