@@ -30,14 +30,6 @@ use crate::StorePath;
 
 /// The normal database connection
 pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
-/// A backup database connection that can access the database
-/// even in a read-only environment
-///
-/// This might produce incorrect results as the connection is not guaranteed
-/// to be the only one accessing the database. (There might be e.g. a
-/// `nixos-rebuild` modifying the database)
-pub const DATABASE_PATH_IMMUTABLE: &str =
-  "file:/nix/var/nix/db/db.sqlite?immutable=1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,20 +152,11 @@ impl CombinedStoreBackend {
     Self { backends }
   }
 
-  #[must_use]
-  pub fn for_correctness(force_correctness: bool) -> Self {
-    if force_correctness {
-      Self::default_correct()
-    } else {
-      Self::default_fast()
-    }
-  }
-
-  pub(crate) fn query_with_correctness<T>(
-    force_correctness: bool,
+  /// Connects the default backend, runs `query` on it, and closes it again.
+  pub(crate) fn query_default<T>(
     query: impl FnOnce(&Self) -> Result<T>,
   ) -> Result<T> {
-    let mut backend = Self::for_correctness(force_correctness);
+    let mut backend = Self::default();
     backend.connect()?;
 
     let result = query(&backend);
@@ -186,33 +169,6 @@ impl CombinedStoreBackend {
       },
       Err(error) => Err(error),
     }
-  }
-
-  /// Returns a backend that is focused on performance and availability.
-  ///
-  /// This first tries the regular sqlite database, then falls back to opening
-  /// it with `immutable=1`, and finally falls back to Nix commands.
-  #[must_use]
-  pub fn default_fast() -> Self {
-    Self::new(vec![
-      Box::new(DbConnection::new(DATABASE_PATH)),
-      Box::new(DbConnection::new(DATABASE_PATH_IMMUTABLE)),
-      Box::new(CommandBackend),
-    ])
-  }
-
-  /// Returns a backend that is focused solely on absolutely guaranteeing
-  /// correct results if the regular sqlite database cannot be opened.
-  ///
-  /// Note that [`DATABASE_PATH_IMMUTABLE`] is not used here, since opening
-  /// the database can lead to undefined results (also silently with no errors)
-  /// if the database is actually modified while opened.
-  #[must_use]
-  pub fn default_correct() -> Self {
-    Self::new(vec![
-      Box::new(DbConnection::new(DATABASE_PATH)),
-      Box::new(CommandBackend),
-    ])
   }
 
   // tries to execute a query until it succeeds or all connected backends have
@@ -257,9 +213,16 @@ impl Display for CombinedStoreBackend {
   }
 }
 
+/// Tries the sqlite database first, then falls back to Nix commands.
+///
+/// The database is never opened with `?immutable=1`, since that can silently
+/// produce wrong results while Nix writes to it.
 impl Default for CombinedStoreBackend {
   fn default() -> Self {
-    Self::default_fast()
+    Self::new(vec![
+      Box::new(DbConnection::new(DATABASE_PATH)),
+      Box::new(CommandBackend),
+    ])
   }
 }
 

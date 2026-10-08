@@ -49,19 +49,6 @@ to diff deployments to remote hosts, which requires dix on the target host.
 - `closure` lists every path in the closure with its NAR size in bytes.
 - `selected` lists the packages selected by a NixOS system's `system-path`.
 
-Snapshots always use the correctness-focused store backends.
-
-# Usage in CI
-
-If you're planning on using dix in CI, you might want to set the
-`--force-correctness` flag to ensure that the results are definitely accurate.\
-Dix will fall back to a connection using `?immutable=1` to Nix's SQLite database
-if it fails connecting normally; This can however result in inaccurate output if
-the database is being written to at the same time.\
-Passing `--force-correctness` will make dix fall back to Nix commands if
-connection to the database fails, which ensures correct output, potentially at
-the cost of speed.
-
 ## Releasing
 
 `dix-diff` is a separate crate because it owns the pure package/version diff

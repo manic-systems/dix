@@ -34,6 +34,12 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are now always
   required.
 - Logs are now written to stderr instead of stdout.
+- **Breaking:** Removed `--force-correctness`; its behaviour is now the only
+  one. dix never opens the Nix database with `?immutable=1`, and falls back
+  to Nix commands instead. This drops the `force_correctness` parameter from
+  `query_diff_report`, `query_store_snapshot` and `json::display_diff`, as well
+  as `CombinedStoreBackend::{for_correctness, default_fast, default_correct}`
+  and `DATABASE_PATH_IMMUTABLE`.
 
 ## 2.2.0
 
