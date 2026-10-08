@@ -1,7 +1,4 @@
-use std::{
-  io,
-  path::Path,
-};
+use std::path::Path;
 
 use eyre::{
   Context as _,
@@ -97,15 +94,6 @@ impl SnapshotDocument {
     }
   }
 
-  /// Writes the document as JSON.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if serializing or writing fails.
-  pub fn write_json(&self, out: impl io::Write) -> Result<()> {
-    serde_json::to_writer(out, self).context("failed to write snapshot JSON")
-  }
-
   /// Parses a document from JSON.
   ///
   /// The format version is checked before anything else, so documents written
@@ -178,9 +166,7 @@ mod tests {
   }
 
   fn to_json(document: &SnapshotDocument) -> String {
-    let mut out = Vec::new();
-    document.write_json(&mut out).unwrap();
-    String::from_utf8(out).unwrap()
+    serde_json::to_string(document).unwrap()
   }
 
   #[test]
