@@ -24,6 +24,7 @@ use dix::{
   json,
 };
 use eyre::eyre;
+use size::Size;
 use yansi::Paint as _;
 
 mod generations;
@@ -108,18 +109,50 @@ enum Command {
 }
 
 /// Options for the human-readable output.
-#[derive(clap::Args, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(clap::Args, Debug, Clone, Copy, PartialEq, Eq)]
 struct RenderArgs {
-  /// Show packages that only changed in amount or size instead of
-  /// summarizing them.
+  /// Also show packages whose version did not change.
   #[arg(long)]
   full: bool,
+
+  /// Hide packages whose version did not change if their size changed by
+  /// less than SIZE (e.g. 4096, 512KiB, 10MB).
+  #[arg(
+    long,
+    value_name = "SIZE",
+    default_value_t = RenderOptions::default().min_size_delta,
+    value_parser = parse_size,
+  )]
+  min_size_delta: Size,
+}
+
+impl Default for RenderArgs {
+  fn default() -> Self {
+    let options = RenderOptions::default();
+    Self {
+      full:           options.full,
+      min_size_delta: options.min_size_delta,
+    }
+  }
 }
 
 impl From<RenderArgs> for RenderOptions {
   fn from(args: RenderArgs) -> Self {
-    Self { full: args.full }
+    Self {
+      full:           args.full,
+      min_size_delta: args.min_size_delta,
+    }
   }
+}
+
+fn parse_size(value: &str) -> Result<Size, String> {
+  let size = value
+    .parse::<Size>()
+    .map_err(|_| format!("invalid size: {value}"))?;
+  if size.bytes() < 0 {
+    return Err(format!("size must not be negative: {value}"));
+  }
+  Ok(size)
 }
 
 /// Determines the output format to be used by dix.

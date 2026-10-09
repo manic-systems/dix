@@ -33,16 +33,30 @@ use crate::{
 };
 
 /// Controls which package diffs a human-readable report shows.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderOptions {
   /// Show packages that only changed in amount or size instead of
   /// summarizing them.
-  pub full: bool,
+  pub full:           bool,
+  /// Show packages that only changed in amount or size anyway if their size
+  /// changed by at least this much.
+  pub min_size_delta: Size,
+}
+
+impl Default for RenderOptions {
+  fn default() -> Self {
+    Self {
+      full:           false,
+      min_size_delta: Size::from_const(1024 * 1024),
+    }
+  }
 }
 
 impl RenderOptions {
   fn shows(self, diff: &PackageDiff) -> bool {
-    self.full || diff.kind() == ChangeKind::Version
+    self.full
+      || diff.kind() == ChangeKind::Version
+      || diff.size.delta().bytes().abs() >= self.min_size_delta.bytes()
   }
 }
 
@@ -573,8 +587,11 @@ mod tests {
     ];
     let mut output = String::new();
 
-    render_package_diffs(&mut output, &diffs, RenderOptions { full: true })
-      .unwrap();
+    render_package_diffs(&mut output, &diffs, RenderOptions {
+      full: true,
+      ..RenderOptions::default()
+    })
+    .unwrap();
 
     let alpha = output.find("[U.] alpha").unwrap();
     let mango = output.find("[D.] mango").unwrap();
@@ -616,8 +633,11 @@ mod tests {
     ];
     let mut output = String::new();
 
-    render_package_diffs(&mut output, &diffs, RenderOptions { full: true })
-      .unwrap();
+    render_package_diffs(&mut output, &diffs, RenderOptions {
+      full: true,
+      ..RenderOptions::default()
+    })
+    .unwrap();
 
     assert!(
       output.contains("[U.] linux-firmware 20260221 -> 20260309, +9.67 KiB")
