@@ -27,6 +27,10 @@ pub struct StoreSnapshot {
 
 /// Queries Nix store data for one path and returns a reusable snapshot.
 ///
+/// # Returns
+///
+/// The closure of `path` with NAR sizes, and the packages it selects.
+///
 /// # Errors
 ///
 /// Returns an error if the store connection or path queries fail.
@@ -40,6 +44,10 @@ pub fn query_store_snapshot(path: &Path) -> Result<StoreSnapshot> {
 ///
 /// This does not call [`StoreBackend::connect`] or [`StoreBackend::close`].
 /// Callers using connection-backed implementations must manage that lifecycle.
+///
+/// # Returns
+///
+/// The closure of `path` with NAR sizes, and the packages it selects.
 ///
 /// # Errors
 ///
@@ -82,6 +90,11 @@ pub struct SnapshotDocument {
 }
 
 impl SnapshotDocument {
+  /// Wraps the `snapshot` of `path` in a document.
+  ///
+  /// # Returns
+  ///
+  /// A document of the current [`SNAPSHOT_FORMAT_VERSION`].
   #[must_use]
   pub const fn new(path: StorePath, snapshot: StoreSnapshot) -> Self {
     Self {
@@ -95,6 +108,10 @@ impl SnapshotDocument {
   ///
   /// The format version is checked before anything else, so documents written
   /// by an incompatible dix fail with a version error instead of a field error.
+  ///
+  /// # Returns
+  ///
+  /// The parsed document.
   ///
   /// # Errors
   ///
@@ -120,6 +137,10 @@ impl SnapshotDocument {
 }
 
 /// Canonicalizes `path` and queries a [`SnapshotDocument`] for it.
+///
+/// # Returns
+///
+/// A snapshot of the store path that `path` resolves to.
 ///
 /// # Errors
 ///
