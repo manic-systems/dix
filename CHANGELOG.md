@@ -10,6 +10,9 @@ This is a changelog of the `dix` repository. It follows the
 
 - The `CHANGED`, `ADDED` and `REMOVED` headings now show how many packages
   they contain, e.g. `CHANGED (12)`.
+- Each package in the JSON output has a `kind` field that is `version`,
+  `amount` or `size`, depending on the most significant change it went
+  through. `ChangeKind` and `PackageDiff::kind` expose the same in the library.
 - Added the `dix last [N]` subcommand, which shows the changes leading up to
   the current profile generation, `dix last --all` for every generation, and
   `dix last --from A --to B` for the generations numbered A to B.

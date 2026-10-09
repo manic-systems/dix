@@ -58,6 +58,17 @@ pub struct PackageDiff {
   pub size:                 PackageSizeDelta,
 }
 
+/// The most significant kind of change a package went through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ChangeKind {
+  /// A version was added, removed or changed.
+  Version,
+  /// Only the amount of some versions changed.
+  Amount,
+  /// Only the size of the package changed.
+  Size,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PackageSizeDelta {
   old: Size,
@@ -65,6 +76,22 @@ pub struct PackageSizeDelta {
 }
 
 impl PackageDiff {
+  /// Classifies the diff by its most significant change.
+  #[must_use]
+  pub fn kind(&self) -> ChangeKind {
+    if self.versions.is_empty() {
+      ChangeKind::Size
+    } else if self
+      .versions
+      .iter()
+      .all(|diff| matches!(diff, VersionDiff::AmountChanged { .. }))
+    {
+      ChangeKind::Amount
+    } else {
+      ChangeKind::Version
+    }
+  }
+
   fn from_engine(
     diff: EngineDiff,
     selected_old: &HashSet<String>,

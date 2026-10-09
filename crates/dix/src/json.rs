@@ -7,6 +7,7 @@ use eyre::{
 use serde::Serialize;
 
 use crate::{
+  ChangeKind,
   DerivationSelectionStatus,
   DiffReport,
   DiffStatus,
@@ -78,6 +79,7 @@ struct JsonDiff<'a> {
   name:                 &'a str,
   versions:             Vec<JsonVersionDiff<'a>>,
   status:               JsonDiffStatus,
+  kind:                 JsonChangeKind,
   selection:            JsonDerivationSelectionStatus,
   has_omitted_versions: bool,
   size_old:             i64,
@@ -96,6 +98,7 @@ impl<'a> From<&'a PackageDiff> for JsonDiff<'a> {
         .map(JsonVersionDiff::from)
         .collect(),
       status:               JsonDiffStatus::from(diff.status),
+      kind:                 JsonChangeKind::from(diff.kind()),
       selection:            JsonDerivationSelectionStatus::from(diff.selection),
       has_omitted_versions: diff.has_omitted_versions,
       size_old:             diff.size.old_size().bytes(),
@@ -211,6 +214,24 @@ impl From<DiffStatus> for JsonDiffStatus {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum JsonChangeKind {
+  Version,
+  Amount,
+  Size,
+}
+
+impl From<ChangeKind> for JsonChangeKind {
+  fn from(kind: ChangeKind) -> Self {
+    match kind {
+      ChangeKind::Version => Self::Version,
+      ChangeKind::Amount => Self::Amount,
+      ChangeKind::Size => Self::Size,
+    }
+  }
+}
+
+#[derive(Serialize)]
 enum JsonDerivationSelectionStatus {
   Selected,
   NewlySelected,
@@ -250,7 +271,7 @@ mod tests {
 
   #[test]
   fn test_basic_json_output_format() {
-    let expected_output = r#"{"diffs":[{"name":"nixos","versions":[{"kind":"changed","old":{"name":"25.11-system-path","amount":1},"new":{"name":"25.12-system-path","amount":1}},{"kind":"amount_changed","version":{"name":"25.12-system"},"old_amount":1,"new_amount":2}],"status":"Changed","selection":"Unselected","has_omitted_versions":false,"size_old":1000,"size_new":2500,"size_delta":1500}],"paths":{"old":7529,"new":7536,"added":5054,"removed":5047},"size_old":115001000,"size_new":115001000}"#;
+    let expected_output = r#"{"diffs":[{"name":"nixos","versions":[{"kind":"changed","old":{"name":"25.11-system-path","amount":1},"new":{"name":"25.12-system-path","amount":1}},{"kind":"amount_changed","version":{"name":"25.12-system"},"old_amount":1,"new_amount":2}],"status":"Changed","kind":"version","selection":"Unselected","has_omitted_versions":false,"size_old":1000,"size_new":2500,"size_delta":1500}],"paths":{"old":7529,"new":7536,"added":5054,"removed":5047},"size_old":115001000,"size_new":115001000}"#;
 
     let report = DiffReport::new_for_test(
       vec![PackageDiff {
