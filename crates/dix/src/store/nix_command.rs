@@ -40,7 +40,16 @@ impl Display for CommandBackend {
   }
 }
 
-/// Runs a Nix command and returns its stdout.
+/// Runs a Nix command.
+///
+/// # Returns
+///
+/// The command's standard output.
+///
+/// # Errors
+///
+/// Returns an error if the command cannot be run, exits unsuccessfully, or
+/// prints invalid UTF-8.
 fn run(command: &mut Command) -> Result<String> {
   let output = command
     .output()
@@ -57,6 +66,15 @@ fn run(command: &mut Command) -> Result<String> {
     .wrap_err_with(|| format!("{command:?} printed invalid UTF-8"))
 }
 
+/// Parses Nix command output listing one store path per line.
+///
+/// # Returns
+///
+/// The store paths, in output order.
+///
+/// # Errors
+///
+/// Returns an error if a line is not a store path.
 fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
   output
     .lines()
@@ -68,6 +86,15 @@ fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
     .collect()
 }
 
+/// Parses `nix path-info --size` output, one path and NAR size per line.
+///
+/// # Returns
+///
+/// The store paths with their NAR sizes, in output order.
+///
+/// # Errors
+///
+/// Returns an error if a line lacks a column, or has an invalid path or size.
 fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
   let mut infos = Vec::new();
   for line in output.lines() {

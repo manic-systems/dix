@@ -124,6 +124,15 @@ fn main() -> eyre::Result<()> {
   }
 }
 
+/// Prints the snapshot of `path` as JSON to stdout.
+///
+/// # Returns
+///
+/// `Ok(())` once the snapshot is printed.
+///
+/// # Errors
+///
+/// Returns an error if the snapshot cannot be queried or written.
 fn print_snapshot(path: &Path) -> eyre::Result<()> {
   let document = dix::query_snapshot_document(path)?;
   let mut out = io::stdout().lock();
@@ -132,6 +141,16 @@ fn print_snapshot(path: &Path) -> eyre::Result<()> {
   Ok(())
 }
 
+/// Prints the diff between `old_path` and `new_path` to stdout.
+///
+/// # Returns
+///
+/// `Ok(())` once the diff is printed.
+///
+/// # Errors
+///
+/// Returns an error if a path does not exist, the store cannot be queried, or
+/// the output cannot be written.
 fn print_diff(
   old_path: &Path,
   new_path: &Path,
@@ -154,6 +173,16 @@ fn print_diff(
   }
 }
 
+/// Renders the diff between `old_path` and `new_path` for humans to stdout.
+///
+/// # Returns
+///
+/// `Ok(())` once the diff is rendered.
+///
+/// # Errors
+///
+/// Returns an error if the store cannot be queried or the output cannot be
+/// written.
 fn display_diff(old_path: &Path, new_path: &Path) -> eyre::Result<()> {
   let mut out = WriteFmt(io::stdout());
 

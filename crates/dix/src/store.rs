@@ -48,6 +48,15 @@ mod size_bytes {
   };
   use size::Size;
 
+  /// Serializes `size` as its byte count.
+  ///
+  /// # Returns
+  ///
+  /// The serializer's output.
+  ///
+  /// # Errors
+  ///
+  /// Returns the serializer's error if writing the number fails.
   #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "signature required by `serde(with)`"
@@ -59,6 +68,15 @@ mod size_bytes {
     serializer.serialize_i64(size.bytes())
   }
 
+  /// Deserializes a [`Size`] from its byte count.
+  ///
+  /// # Returns
+  ///
+  /// The size.
+  ///
+  /// # Errors
+  ///
+  /// Returns the deserializer's error if the value is not an integer.
   pub fn deserialize<'de, D: Deserializer<'de>>(
     deserializer: D,
   ) -> Result<Size, D::Error> {
@@ -133,6 +151,15 @@ impl CombinedStoreBackend {
   }
 
   /// Connects the default backend, runs `query` on it, and closes it again.
+  ///
+  /// # Returns
+  ///
+  /// The result of `query`.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if no backend can be connected, `query` fails, or the
+  /// backend cannot be closed.
   pub(crate) fn query_default<T>(
     query: impl FnOnce(&Self) -> Result<T>,
   ) -> Result<T> {

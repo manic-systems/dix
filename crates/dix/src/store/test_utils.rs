@@ -19,6 +19,14 @@ use tempfile::TempDir;
 use crate::store::StoreBackend;
 
 /// Sums the NAR sizes of the closure of `path`.
+///
+/// # Returns
+///
+/// The total NAR size of the closure.
+///
+/// # Errors
+///
+/// Returns an error if the closure cannot be queried.
 pub fn closure_size(backend: &dyn StoreBackend, path: &Path) -> Result<Size> {
   Ok(Size::from_bytes(
     backend
