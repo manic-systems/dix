@@ -153,9 +153,9 @@ fn write_size_diff(
   let size_diff = size_new - size_old;
 
   let (sign, styled_diff) = match size_diff.bytes().cmp(&0) {
-    Ordering::Less => ("", size_diff.red()),
+    Ordering::Less => ("", size_diff.magenta()),
     Ordering::Equal => ("", size_diff.resetting()),
-    Ordering::Greater => ("+", size_diff.green()),
+    Ordering::Greater => ("+", size_diff.bright_cyan()),
   };
 
   writeln!(
