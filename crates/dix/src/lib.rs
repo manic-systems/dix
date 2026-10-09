@@ -21,7 +21,10 @@ pub use dix_diff::{
   VersionDiff,
 };
 mod render;
-pub use render::write_diff_report;
+pub use render::{
+  RenderOptions,
+  write_diff_report,
+};
 pub mod report;
 pub use report::{
   ChangeKind,

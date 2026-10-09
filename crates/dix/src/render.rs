@@ -20,6 +20,7 @@ use yansi::{
 };
 
 use crate::{
+  ChangeKind,
   DerivationSelectionStatus,
   DiffReport,
   DiffStatus,
@@ -31,11 +32,25 @@ use crate::{
   VersionDiff,
 };
 
+/// Controls which package diffs a human-readable report shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RenderOptions {
+  /// Show packages that only changed in amount or size instead of
+  /// summarizing them.
+  pub full: bool,
+}
+
+impl RenderOptions {
+  fn shows(self, diff: &PackageDiff) -> bool {
+    self.full || diff.kind() == ChangeKind::Version
+  }
+}
+
 /// Writes a full diff report to the provided writer.
 ///
 /// # Returns
 ///
-/// Returns the number of package diffs written.
+/// Returns the number of package diffs hidden by `options`.
 ///
 /// # Errors
 ///
@@ -43,24 +58,26 @@ use crate::{
 pub fn write_diff_report(
   writer: &mut impl fmt::Write,
   report: &DiffReport,
+  options: RenderOptions,
 ) -> Result<usize, fmt::Error> {
   writeln!(writer)?;
 
-  let wrote = render_package_diffs(writer, report.diffs())?;
+  let hidden = render_package_diffs(writer, report.diffs(), options)?;
 
-  if wrote > 0 {
+  if report.diffs().len() > hidden {
     writeln!(writer)?;
   }
 
   write_path_stats(writer, report.path_stats())?;
   write_size_diff(writer, report.size_old(), report.size_new())?;
 
-  Ok(wrote)
+  Ok(hidden)
 }
 
 fn render_package_diffs(
   writer: &mut impl fmt::Write,
   diffs: &[PackageDiff],
+  options: RenderOptions,
 ) -> Result<usize, fmt::Error> {
   let mut diffs = diffs.iter().collect::<Vec<_>>();
   diffs.sort_by(|a, b| {
@@ -70,71 +87,87 @@ fn render_package_diffs(
       .then_with(|| a.status.cmp(&b.status))
   });
 
-  render_diffs(writer, &diffs)
+  render_diffs(writer, &diffs, options)
 }
 
 fn render_diffs(
   writer: &mut impl fmt::Write,
   diffs: &[&PackageDiff],
+  options: RenderOptions,
 ) -> Result<usize, fmt::Error> {
   let name_width = diffs
     .iter()
+    .filter(|diff| options.shows(diff))
     .map(|diff| diff.name.width())
     .max()
     .unwrap_or(0)
     + 1;
-  let mut last_status_group = None::<StatusGroup>;
+  let mut wrote_group = false;
+  let mut hidden = 0;
 
-  for diff in diffs {
-    let group = status_group(diff.status);
-    if last_status_group.is_none_or(|last_group| last_group != group) {
-      if last_status_group.is_some() {
-        writeln!(writer)?;
-      }
+  for (group, group_diffs) in
+    &diffs.iter().chunk_by(|diff| status_group(diff.status))
+  {
+    let (shown, group_hidden): (Vec<&&PackageDiff>, Vec<_>) =
+      group_diffs.partition(|diff| options.shows(diff));
+    hidden += group_hidden.len();
 
-      let header = match group {
-        StatusGroup::Changed => "CHANGED",
-        StatusGroup::Added => "ADDED",
-        StatusGroup::Removed => "REMOVED",
-      }
-      .bold();
-      let count = diffs
-        .iter()
-        .filter(|other| status_group(other.status) == group)
-        .count();
-      let count = format!("({count})");
-
-      writeln!(writer, "{header} {count}", count = count.dim())?;
-      last_status_group = Some(group);
+    if shown.is_empty() {
+      continue;
     }
 
-    let status_char = status_char(diff.status);
-    let selection_char = selection_char(diff.selection);
-    let name_painted = diff.name.paint(selection_char.style);
+    if wrote_group {
+      writeln!(writer)?;
+    }
+    wrote_group = true;
 
-    write!(
-      writer,
-      "[{status_char}{selection_char}] {name_painted:<name_width$}"
-    )?;
+    let header = match group {
+      StatusGroup::Changed => "CHANGED",
+      StatusGroup::Added => "ADDED",
+      StatusGroup::Removed => "REMOVED",
+    }
+    .bold();
+    let count = format!("({})", shown.len());
 
-    let (old_str, new_str) =
-      fmt_version_diffs(&diff.versions, diff.has_omitted_versions)?;
-    let arrow = if !old_str.is_empty() && !new_str.is_empty() {
-      " -> "
-    } else {
-      ""
-    };
-    let size_delta = fmt_package_size_delta(diff.size);
-    if old_str.is_empty() && new_str.is_empty() {
-      writeln!(writer, "{size_delta}")?;
-    } else if size_delta.is_empty() {
-      writeln!(writer, "{old_str}{arrow}{new_str}")?;
-    } else {
-      writeln!(writer, "{old_str}{arrow}{new_str}, {size_delta}")?;
+    writeln!(writer, "{header} {count}", count = count.dim())?;
+
+    for diff in &shown {
+      render_diff(writer, diff, name_width)?;
     }
   }
 
-  Ok(diffs.len())
+  Ok(hidden)
+}
+
+fn render_diff(
+  writer: &mut impl fmt::Write,
+  diff: &PackageDiff,
+  name_width: usize,
+) -> fmt::Result {
+  let status_char = status_char(diff.status);
+  let selection_char = selection_char(diff.selection);
+  let name_painted = diff.name.paint(selection_char.style);
+
+  write!(
+    writer,
+    "[{status_char}{selection_char}] {name_painted:<name_width$}"
+  )?;
+
+  let (old_str, new_str) =
+    fmt_version_diffs(&diff.versions, diff.has_omitted_versions)?;
+  let arrow = if !old_str.is_empty() && !new_str.is_empty() {
+    " -> "
+  } else {
+    ""
+  };
+  let size_delta = fmt_package_size_delta(diff.size);
+  if old_str.is_empty() && new_str.is_empty() {
+    writeln!(writer, "{size_delta}")
+  } else if size_delta.is_empty() {
+    writeln!(writer, "{old_str}{arrow}{new_str}")
+  } else {
+    writeln!(writer, "{old_str}{arrow}{new_str}, {size_delta}")
+  }
 }
 
 fn fmt_package_size_delta(size: PackageSizeDelta) -> String {
@@ -540,7 +573,8 @@ mod tests {
     ];
     let mut output = String::new();
 
-    render_package_diffs(&mut output, &diffs).unwrap();
+    render_package_diffs(&mut output, &diffs, RenderOptions { full: true })
+      .unwrap();
 
     let alpha = output.find("[U.] alpha").unwrap();
     let mango = output.find("[D.] mango").unwrap();
@@ -582,7 +616,8 @@ mod tests {
     ];
     let mut output = String::new();
 
-    render_package_diffs(&mut output, &diffs).unwrap();
+    render_package_diffs(&mut output, &diffs, RenderOptions { full: true })
+      .unwrap();
 
     assert!(
       output.contains("[U.] linux-firmware 20260221 -> 20260309, +9.67 KiB")
