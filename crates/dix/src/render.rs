@@ -160,7 +160,12 @@ fn render_diff(
 ) -> fmt::Result {
   let status_char = status_char(diff.status);
   let selection_char = selection_char(diff.selection);
-  let name_painted = diff.name.paint(selection_char.style);
+  let name_painted = match diff.selection {
+    DerivationSelectionStatus::Selected
+    | DerivationSelectionStatus::NewlySelected => Painted::new(&diff.name),
+    DerivationSelectionStatus::Unselected
+    | DerivationSelectionStatus::NewlyUnselected => diff.name.dim(),
+  };
 
   write!(
     writer,

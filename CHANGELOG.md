@@ -50,6 +50,8 @@ This is a changelog of the `dix` repository. It follows the
   by at least `--min-size-delta` (default 1 MiB). A note at the end of the
   output says how many were hidden. Pass `--full` to `dix diff` or `dix last`
   to show them.
+- Names of packages that are not selected are now dimmed, instead of names of
+  selected packages being bold.
 - **Breaking:** `write_diff_report` takes a `RenderOptions` argument and
   returns the number of hidden package diffs instead of the number written.
 - **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
