@@ -438,6 +438,59 @@ pub fn query_diff_report(
   Ok(report)
 }
 
+/// Queries consecutive paths on one store connection and diffs adjacent
+/// snapshots. Each path is queried once, even when it participates in two
+/// comparisons.
+///
+/// # Returns
+///
+/// One report per adjacent pair of `paths`, in order; empty if there are
+/// fewer than two paths.
+///
+/// # Errors
+///
+/// Returns an error if connecting to the store or querying a path fails.
+pub fn query_adjacent_diff_reports(paths: &[&Path]) -> Result<Vec<DiffReport>> {
+  if paths.len() < 2 {
+    return Ok(Vec::new());
+  }
+
+  CombinedStoreBackend::query_default(|backend| {
+    adjacent_diff_reports(paths, |path| {
+      query_store_snapshot_with_backend(backend, path)
+    })
+  })
+}
+
+/// Diffs adjacent snapshots of `paths`, obtaining each snapshot from `query`
+/// exactly once.
+///
+/// # Returns
+///
+/// One report per adjacent pair of `paths`, in order; empty if there are
+/// fewer than two paths.
+///
+/// # Errors
+///
+/// Returns the first error from `query`.
+fn adjacent_diff_reports(
+  paths: &[&Path],
+  mut query: impl FnMut(&Path) -> Result<StoreSnapshot>,
+) -> Result<Vec<DiffReport>> {
+  let mut paths = paths.iter();
+  let Some(first) = paths.next() else {
+    return Ok(Vec::new());
+  };
+  let mut previous = query(first)?;
+  let mut reports = Vec::with_capacity(paths.len());
+  for path in paths {
+    let next = query(path)?;
+    reports.push(diff_store_snapshots(&previous, &next));
+    previous = next;
+  }
+  Ok(reports)
+}
+
 /// Builds a diff report from two already queried store snapshots.
 #[must_use]
 pub fn diff_store_snapshots(
@@ -512,6 +565,38 @@ mod tests {
       store_path_with_hash(hash, name),
       Size::from_bytes(nar_size),
     )
+  }
+
+  #[test]
+  fn adjacent_reports_query_each_snapshot_once_and_diff_in_order() {
+    let paths = [Path::new("first"), Path::new("second"), Path::new("third")];
+    let mut queried = Vec::new();
+    let reports = adjacent_diff_reports(&paths, |path| {
+      queried.push(path.to_path_buf());
+      let (name, size) = match path.to_str().unwrap() {
+        "first" => ("package-1", 100),
+        "second" => ("package-2", 200),
+        "third" => ("package-3", 300),
+        other => panic!("unexpected query: {other}"),
+      };
+      Ok(StoreSnapshot {
+        closure:  vec![store_path_info(name, size)],
+        selected: Vec::new(),
+      })
+    })
+    .unwrap();
+
+    assert_eq!(queried, paths.map(Path::to_path_buf));
+    assert_eq!(reports.len(), 2);
+    assert_eq!(
+      (reports[0].size_old().bytes(), reports[0].size_new().bytes()),
+      (100, 200)
+    );
+    assert_eq!(
+      (reports[1].size_old().bytes(), reports[1].size_new().bytes()),
+      (200, 300)
+    );
+    assert!(reports.iter().all(|report| report.diffs().len() == 1));
   }
 
   #[test]

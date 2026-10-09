@@ -10,6 +10,7 @@ use std::{
     IsTerminal as _,
     Write as _,
   },
+  num::NonZeroUsize,
   path::{
     Path,
     PathBuf,
@@ -17,9 +18,19 @@ use std::{
 };
 
 use clap::Parser as _;
-use dix::json;
+use dix::{
+  DiffReport,
+  json,
+};
 use eyre::eyre;
 use yansi::Paint as _;
+
+mod generations;
+use generations::{
+  SYSTEM_PROFILE,
+  Span,
+  select_generations,
+};
 
 struct WriteFmt<W: io::Write>(W);
 
@@ -54,6 +65,32 @@ enum Command {
   Diff {
     old_path: PathBuf,
     new_path: PathBuf,
+
+    /// Select the output format to use.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    output: OutputFormat,
+  },
+  /// Show successive changes ending at the current profile generation.
+  Last {
+    /// Number of transitions to show.
+    #[arg(default_value_t = NonZeroUsize::MIN)]
+    count: NonZeroUsize,
+
+    /// Show every adjacent pair of existing generations in numerical order.
+    #[arg(long, conflicts_with_all = ["count", "from", "to"])]
+    all: bool,
+
+    /// Show generations numbered from GENERATION onwards.
+    #[arg(short, long, value_name = "GENERATION", conflicts_with = "count")]
+    from: Option<u64>,
+
+    /// Show generations numbered up to GENERATION.
+    #[arg(short, long, value_name = "GENERATION", conflicts_with = "count")]
+    to: Option<u64>,
+
+    /// Profile link to inspect.
+    #[arg(long, default_value = SYSTEM_PROFILE)]
+    profile: PathBuf,
 
     /// Select the output format to use.
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
@@ -120,6 +157,21 @@ fn main() -> eyre::Result<()> {
       new_path,
       output,
     } => print_diff(&old_path, &new_path, output),
+    Command::Last {
+      count,
+      all,
+      from,
+      to,
+      profile,
+      output,
+    } => {
+      let span = if all || from.is_some() || to.is_some() {
+        Span::Range { from, to }
+      } else {
+        Span::Latest(count)
+      };
+      print_last(&profile, span, output)
+    },
     Command::Snapshot { path } => print_snapshot(&path),
   }
 }
@@ -167,13 +219,84 @@ fn print_diff(
 
   tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
 
+  let report = dix::query_diff_report(old_path, new_path)?;
   match output {
-    OutputFormat::Human => display_diff(old_path, new_path),
-    OutputFormat::Json => json::display_diff(old_path, new_path),
+    OutputFormat::Human => display_diff(old_path, new_path, &report),
+    OutputFormat::Json => json::write_report(io::stdout(), &report),
   }
 }
 
-/// Renders the diff between `old_path` and `new_path` for humans to stdout.
+/// One transition in the array printed by `dix last --output json`.
+#[derive(serde::Serialize)]
+struct JsonTransition<'a> {
+  /// Number of the older generation.
+  old_generation: u64,
+  /// Number of the newer generation.
+  new_generation: u64,
+  /// Generation link of the older generation.
+  old_path:       &'a Path,
+  /// Generation link of the newer generation.
+  new_path:       &'a Path,
+  /// Diff from the older to the newer generation.
+  report:         json::JsonReport<'a>,
+}
+
+/// Prints the diff of each transition between the generations of `profile`
+/// selected by `span` to stdout.
+///
+/// # Returns
+///
+/// `Ok(())` once all transitions are printed.
+///
+/// # Errors
+///
+/// Returns an error if the generations cannot be selected, the store cannot
+/// be queried, or the output cannot be written.
+fn print_last(
+  profile: &Path,
+  span: Span,
+  output: OutputFormat,
+) -> eyre::Result<()> {
+  let generations = select_generations(profile, span)?;
+  let paths = generations
+    .iter()
+    .map(|generation| generation.path.as_path())
+    .collect::<Vec<_>>();
+  let reports = dix::query_adjacent_diff_reports(&paths)?;
+  let transitions = generations.array_windows().zip(&reports);
+
+  match output {
+    OutputFormat::Human => {
+      for ([old, new], report) in transitions {
+        writeln!(
+          WriteFmt(io::stdout()),
+          "Generation {} -> {}",
+          old.number,
+          new.number
+        )?;
+        display_diff(&old.path, &new.path, report)?;
+      }
+      Ok(())
+    },
+    OutputFormat::Json => {
+      let transitions = transitions
+        .map(|([old, new], report)| {
+          JsonTransition {
+            old_generation: old.number,
+            new_generation: new.number,
+            old_path:       &old.path,
+            new_path:       &new.path,
+            report:         json::JsonReport::from(report),
+          }
+        })
+        .collect::<Vec<_>>();
+      Ok(serde_json::to_writer(io::stdout(), &transitions)?)
+    },
+  }
+}
+
+/// Renders `report`, the diff between `old_path` and `new_path`, for humans to
+/// stdout.
 ///
 /// # Returns
 ///
@@ -181,12 +304,15 @@ fn print_diff(
 ///
 /// # Errors
 ///
-/// Returns an error if the store cannot be queried or the output cannot be
-/// written.
-fn display_diff(old_path: &Path, new_path: &Path) -> eyre::Result<()> {
+/// Returns an error if the output cannot be written.
+fn display_diff(
+  old_path: &Path,
+  new_path: &Path,
+  report: &DiffReport,
+) -> eyre::Result<()> {
   let mut out = WriteFmt(io::stdout());
 
-  tracing::info!("starting diff computation");
+  tracing::info!("rendering diff report");
 
   writeln!(
     out,
@@ -205,10 +331,9 @@ fn display_diff(old_path: &Path, new_path: &Path) -> eyre::Result<()> {
       .display(),
   )?;
 
-  let report = dix::query_diff_report(old_path, new_path)?;
-  dix::write_diff_report(&mut out, &report)?;
+  dix::write_diff_report(&mut out, report)?;
 
-  tracing::info!("diff computation complete");
+  tracing::info!("diff report rendered");
 
   Ok(())
 }
@@ -257,6 +382,65 @@ mod tests {
   #[test]
   fn bare_paths_are_rejected() {
     assert!(Cli::try_parse_from(["dix", "/old", "/new"]).is_err());
+  }
+
+  #[test]
+  fn last_subcommand_parses() {
+    let cli = Cli::try_parse_from(["dix", "last", "3"]).unwrap();
+    assert_eq!(cli.command, Command::Last {
+      count:   NonZeroUsize::new(3).unwrap(),
+      all:     false,
+      from:    None,
+      to:      None,
+      profile: PathBuf::from(SYSTEM_PROFILE),
+      output:  OutputFormat::Human,
+    });
+
+    let cli = Cli::try_parse_from([
+      "dix",
+      "last",
+      "--all",
+      "--profile",
+      "/my/profile",
+      "--output",
+      "json",
+    ])
+    .unwrap();
+    assert_eq!(cli.command, Command::Last {
+      count:   NonZeroUsize::MIN,
+      all:     true,
+      from:    None,
+      to:      None,
+      profile: PathBuf::from("/my/profile"),
+      output:  OutputFormat::Json,
+    });
+  }
+
+  #[test]
+  fn last_accepts_generation_ranges() {
+    let cli =
+      Cli::try_parse_from(["dix", "last", "--from", "300", "-t", "320"])
+        .unwrap();
+    assert!(matches!(cli.command, Command::Last {
+      from: Some(300),
+      to: Some(320),
+      ..
+    }));
+  }
+
+  #[test]
+  fn last_rejects_invalid_arguments() {
+    for args in [
+      ["dix", "last", "0"].as_slice(),
+      &["dix", "last", "-1"],
+      &["dix", "last", "not-a-number"],
+      &["dix", "last", "3", "--all"],
+      &["dix", "last", "3", "--from", "2"],
+      &["dix", "last", "--all", "--to", "2"],
+      &["dix", "last", "--from", "-2"],
+    ] {
+      assert!(Cli::try_parse_from(args).is_err(), "{args:?}");
+    }
   }
 
   #[test]

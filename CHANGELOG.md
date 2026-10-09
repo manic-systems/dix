@@ -8,6 +8,9 @@ This is a changelog of the `dix` repository. It follows the
 
 ### Added
 
+- Added the `dix last [N]` subcommand, which shows the changes leading up to
+  the current profile generation, `dix last --all` for every generation, and
+  `dix last --from A --to B` for the generations numbered A to B.
 - Added the `dix snapshot <PATH>` subcommand, which prints the closure of a
   store path as a versioned JSON `SnapshotDocument`. This lets the closure be
   captured on one machine (e.g. a remote deployment target) and diffed on
@@ -38,6 +41,8 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are
   now always required.
 - Logs are now written to stderr instead of stdout.
+- **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
+  serializes an already queried report instead of querying and printing it.
 
 ## 2.2.0
 
