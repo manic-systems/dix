@@ -31,6 +31,14 @@ pub struct DiffReport {
   pub size_new:   Size,
 }
 
+impl DiffReport {
+  /// Whether the closures differ, i.e. any store path was added or removed.
+  #[must_use]
+  pub const fn has_changes(&self) -> bool {
+    self.path_stats.added > 0 || self.path_stats.removed > 0
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathStats {
   pub old:     usize,

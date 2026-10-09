@@ -17,6 +17,7 @@ use std::{
     Path,
     PathBuf,
   },
+  process::ExitCode,
 };
 
 use dix::{
@@ -35,6 +36,7 @@ use yansi::Paint as _;
 
 mod generations;
 use generations::{
+  Generation,
   SYSTEM_PROFILE,
   Span,
   select_generations,
@@ -86,6 +88,9 @@ enum Command {
 
     #[pound(flatten)]
     render: RenderArgs,
+
+    #[pound(flatten)]
+    status: StatusArgs,
   },
   /// Show successive changes ending at the current profile generation.
   Last {
@@ -115,6 +120,9 @@ enum Command {
 
     #[pound(flatten)]
     render: RenderArgs,
+
+    #[pound(flatten)]
+    status: StatusArgs,
   },
   /// Print the closure of a store path as a versioned JSON snapshot.
   Snapshot { path: PathBuf },
@@ -152,6 +160,29 @@ impl From<RenderArgs> for RenderOptions {
   }
 }
 
+/// Options for signalling differences through the exit status.
+#[derive(Parse, Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct StatusArgs {
+  /// Exit with 1 if the closures differ and 0 if not. Errors exit with 2.
+  #[pound(long)]
+  exit_code: bool,
+
+  /// Print nothing. Implies --exit-code.
+  #[pound(short, long)]
+  quiet: bool,
+}
+
+impl StatusArgs {
+  /// Maps whether the compared closures `changed` to the exit status.
+  const fn exit_status(self, changed: bool) -> ExitCode {
+    if changed && (self.exit_code || self.quiet) {
+      ExitCode::FAILURE
+    } else {
+      ExitCode::SUCCESS
+    }
+  }
+}
+
 fn parse_size(value: &str) -> Result<Size, String> {
   let size = value
     .parse::<Size>()
@@ -171,7 +202,7 @@ enum OutputFormat {
   Json,
 }
 
-fn main() -> misstep::Result<()> {
+fn main() -> ExitCode {
   let Cli {
     command,
     verbose,
@@ -198,13 +229,36 @@ fn main() -> misstep::Result<()> {
     .without_time()
     .init();
 
-  match command {
+  run(command).unwrap_or_else(|error| {
+    let _ = writeln!(io::stderr(), "Error: {error:?}");
+    ExitCode::from(2)
+  })
+}
+
+/// Runs `command`.
+///
+/// # Returns
+///
+/// The exit status to report.
+///
+/// # Errors
+///
+/// Returns an error if `command` fails or its output cannot be written.
+fn run(command: Command) -> misstep::Result<ExitCode> {
+  let status = match command {
     Command::Diff {
       old_path,
       new_path,
       output,
       render,
-    } => print_diff(&old_path, &new_path, output, render.into()),
+      status,
+    } => {
+      let report = diff_paths(&old_path, &new_path)?;
+      if !status.quiet {
+        print_diff(&old_path, &new_path, &report, output, render.into())?;
+      }
+      status.exit_status(report.has_changes())
+    },
     Command::Last {
       count,
       all,
@@ -213,16 +267,30 @@ fn main() -> misstep::Result<()> {
       profile,
       output,
       render,
+      status,
     } => {
       let span = if all || from.is_some() || to.is_some() {
         Span::Range { from, to }
       } else {
         Span::Latest(count)
       };
-      print_last(&profile, span, output, render.into())
+      let generations = select_generations(&profile, span)?;
+      let reports = diff_generations(&generations)?;
+      if !status.quiet {
+        print_last(&generations, &reports, output, render.into())?;
+      }
+      status.exit_status(reports.iter().any(DiffReport::has_changes))
     },
-    Command::Snapshot { path } => print_snapshot(&path),
-  }
+    Command::Snapshot { path } => {
+      print_snapshot(&path)?;
+      ExitCode::SUCCESS
+    },
+  };
+
+  // std flushes stdout once `main` returns, but ignores errors by then. Output
+  // without a trailing newline, like JSON, may still be buffered here.
+  io::stdout().flush()?;
+  Ok(status)
 }
 
 /// Prints the snapshot of `path` as JSON to stdout.
@@ -242,8 +310,24 @@ fn print_snapshot(path: &Path) -> misstep::Result<()> {
   Ok(())
 }
 
-/// Prints the diff between `old_path` and `new_path`, each a store path or
-/// snapshot file, to stdout.
+/// Diffs `old_path` and `new_path`, each a store path or snapshot file.
+///
+/// # Returns
+///
+/// The diff from `old_path` to `new_path`.
+///
+/// # Errors
+///
+/// Returns an error if a path cannot be loaded as a store path or snapshot.
+fn diff_paths(old_path: &Path, new_path: &Path) -> misstep::Result<DiffReport> {
+  // Only opened if an argument is not a snapshot file.
+  let store: LazyCell<dix::Store> = LazyCell::new(dix::Store::open);
+  let old = load_snapshot(old_path, &store)?;
+  let new = load_snapshot(new_path, &store)?;
+  Ok(dix::diff_store_snapshots(&old.snapshot, &new.snapshot))
+}
+
+/// Prints `report`, the diff between `old_path` and `new_path`, to stdout.
 ///
 /// # Returns
 ///
@@ -251,29 +335,24 @@ fn print_snapshot(path: &Path) -> misstep::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if a path cannot be loaded as a store path or snapshot, or
-/// the output cannot be written.
+/// Returns an error if the output cannot be written.
 fn print_diff(
   old_path: &Path,
   new_path: &Path,
+  report: &DiffReport,
   output: OutputFormat,
   options: RenderOptions,
 ) -> misstep::Result<()> {
-  // Only opened if an argument is not a snapshot file.
-  let store: LazyCell<dix::Store> = LazyCell::new(dix::Store::open);
-  let old = load_snapshot(old_path, &store)?;
-  let new = load_snapshot(new_path, &store)?;
-  let report = dix::diff_store_snapshots(&old.snapshot, &new.snapshot);
   match output {
     OutputFormat::Human => {
-      let hidden = display_diff(&old.path, &new.path, &report, options)?;
+      let hidden = display_diff(old_path, new_path, report, options)?;
       dix::write_hidden_note(&mut io::stdout().lock(), hidden, "--full")?;
       Ok(())
     },
     OutputFormat::Json => {
       Ok(serde_json::to_writer(
         io::stdout(),
-        &json::JsonReport::from(&report),
+        &json::JsonReport::from(report),
       )?)
     },
   }
@@ -329,24 +408,18 @@ struct JsonTransition<'a> {
   report:         json::JsonReport<'a>,
 }
 
-/// Prints the diff of each transition between the generations of `profile`
-/// selected by `span` to stdout.
+/// Diffs each adjacent pair of `generations`.
 ///
 /// # Returns
 ///
-/// `Ok(())` once all transitions are printed.
+/// The diff of each transition, in the order of `generations`.
 ///
 /// # Errors
 ///
-/// Returns an error if the generations cannot be selected, the store cannot
-/// be queried, or the output cannot be written.
-fn print_last(
-  profile: &Path,
-  span: Span,
-  output: OutputFormat,
-  options: RenderOptions,
-) -> misstep::Result<()> {
-  let generations = select_generations(profile, span)?;
+/// Returns an error if the store cannot be queried.
+fn diff_generations(
+  generations: &[Generation],
+) -> misstep::Result<Vec<DiffReport>> {
   let store = dix::Store::open();
   let mut snapshots = generations.iter().map(|generation| {
     store
@@ -361,7 +434,26 @@ fn print_last(
       old = new;
     }
   }
-  let transitions = generations.array_windows().zip(&reports);
+  Ok(reports)
+}
+
+/// Prints `reports`, the diff of each transition between adjacent
+/// `generations`, to stdout.
+///
+/// # Returns
+///
+/// `Ok(())` once all transitions are printed.
+///
+/// # Errors
+///
+/// Returns an error if the output cannot be written.
+fn print_last(
+  generations: &[Generation],
+  reports: &[DiffReport],
+  output: OutputFormat,
+  options: RenderOptions,
+) -> misstep::Result<()> {
+  let transitions = generations.array_windows().zip(reports);
 
   match output {
     OutputFormat::Human => {
@@ -478,6 +570,7 @@ mod tests {
       new_path: PathBuf::from("/new"),
       output:   OutputFormat::Human,
       render:   RenderArgs::default(),
+      status:   StatusArgs::default(),
     });
   }
 
@@ -497,6 +590,7 @@ mod tests {
       profile: PathBuf::from(SYSTEM_PROFILE),
       output:  OutputFormat::Human,
       render:  RenderArgs::default(),
+      status:  StatusArgs::default(),
     });
 
     let cli = Cli::try_parse_from([
@@ -516,6 +610,7 @@ mod tests {
       profile: PathBuf::from("/my/profile"),
       output:  OutputFormat::Json,
       render:  RenderArgs::default(),
+      status:  StatusArgs::default(),
     });
   }
 

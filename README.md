@@ -41,7 +41,7 @@ $ dix last --from 300 --to 320
 
 `last` shows what changed from the previous generation to the current one.
 `last N` shows the N most recent changes leading up to the current generation,
-comparing each generation with its predecessor, where N is a positive integer. 
+comparing each generation with its predecessor, where N is a positive integer.
 If fewer changes are available, it shows all available changes.
 Missing generations, such as those removed by garbage collection, are skipped.
 
@@ -50,6 +50,10 @@ order, including generations newer than the current one after a rollback.
 `last --from A --to B` does the same for the generations numbered A to B,
 inclusive; either bound can be left out. Like `--all`, ranges do not depend on
 the current generation. Neither can be combined with N.
+
+`diff` and `last` exit with 0 unless something goes wrong, in which case they
+exit with 2. With `--exit-code`, they exit with 1 if the compared closures
+differ. `-q`/`--quiet` prints nothing and implies `--exit-code`.
 
 The default profile is `/nix/var/nix/profiles/system`. Use `--profile PATH` for
 another unnumbered profile link, for example

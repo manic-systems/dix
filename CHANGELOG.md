@@ -30,6 +30,9 @@ This is a changelog of the `dix` repository. It follows the
 - Added the default `cli` and `store` features. Library users that only diff
   snapshots can disable default features to drop the SQLite and command-line
   dependencies. `Store` requires `store`.
+- `dix diff` and `dix last` take `--exit-code` to exit with 1 if the compared
+  closures differ. `-q`/`--quiet` does the same without printing the diff.
+  `DiffReport::has_changes` exposes the same check in the library.
 
 ### Fixed
 
@@ -51,6 +54,10 @@ This is a changelog of the `dix` repository. It follows the
   `CommandBackend::store_url(...)`, which `dix snapshot` replaces.
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are
   now always required.
+- **Breaking:** Errors now exit with 2 instead of 1, since `--exit-code` uses 1
+  to report that the compared closures differ.
+- **Breaking:** `-q`/`--quiet` no longer decreases logging verbosity. It is now
+  the `--quiet` of `dix diff` and `dix last`.
 - Logs are now written to stderr instead of stdout.
 - `RUST_LOG` is no longer read. Use `-v` (repeatable) to show more log output.
 - Packages whose version did not change are hidden unless their size changed
