@@ -20,6 +20,7 @@ use std::{
 use clap::Parser as _;
 use dix::{
   DiffReport,
+  RenderOptions,
   json,
 };
 use eyre::eyre;
@@ -69,6 +70,9 @@ enum Command {
     /// Select the output format to use.
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     output: OutputFormat,
+
+    #[command(flatten)]
+    render: RenderArgs,
   },
   /// Show successive changes ending at the current profile generation.
   Last {
@@ -95,9 +99,27 @@ enum Command {
     /// Select the output format to use.
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     output: OutputFormat,
+
+    #[command(flatten)]
+    render: RenderArgs,
   },
   /// Print the closure of a store path as a versioned JSON snapshot.
   Snapshot { path: PathBuf },
+}
+
+/// Options for the human-readable output.
+#[derive(clap::Args, Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RenderArgs {
+  /// Show packages that only changed in amount or size instead of
+  /// summarizing them.
+  #[arg(long)]
+  full: bool,
+}
+
+impl From<RenderArgs> for RenderOptions {
+  fn from(args: RenderArgs) -> Self {
+    Self { full: args.full }
+  }
 }
 
 /// Determines the output format to be used by dix.
@@ -156,7 +178,8 @@ fn main() -> eyre::Result<()> {
       old_path,
       new_path,
       output,
-    } => print_diff(&old_path, &new_path, output),
+      render,
+    } => print_diff(&old_path, &new_path, output, render.into()),
     Command::Last {
       count,
       all,
@@ -164,13 +187,14 @@ fn main() -> eyre::Result<()> {
       to,
       profile,
       output,
+      render,
     } => {
       let span = if all || from.is_some() || to.is_some() {
         Span::Range { from, to }
       } else {
         Span::Latest(count)
       };
-      print_last(&profile, span, output)
+      print_last(&profile, span, output, render.into())
     },
     Command::Snapshot { path } => print_snapshot(&path),
   }
@@ -207,6 +231,7 @@ fn print_diff(
   old_path: &Path,
   new_path: &Path,
   output: OutputFormat,
+  options: RenderOptions,
 ) -> eyre::Result<()> {
   for (name, path) in [("old", old_path), ("new", new_path)] {
     if !path.exists() {
@@ -221,7 +246,10 @@ fn print_diff(
 
   let report = dix::query_diff_report(old_path, new_path)?;
   match output {
-    OutputFormat::Human => display_diff(old_path, new_path, &report),
+    OutputFormat::Human => {
+      let hidden = display_diff(old_path, new_path, &report, options)?;
+      print_hidden_note(hidden)
+    },
     OutputFormat::Json => json::write_report(io::stdout(), &report),
   }
 }
@@ -256,6 +284,7 @@ fn print_last(
   profile: &Path,
   span: Span,
   output: OutputFormat,
+  options: RenderOptions,
 ) -> eyre::Result<()> {
   let generations = select_generations(profile, span)?;
   let paths = generations
@@ -267,6 +296,7 @@ fn print_last(
 
   match output {
     OutputFormat::Human => {
+      let mut hidden = 0;
       for ([old, new], report) in transitions {
         writeln!(
           WriteFmt(io::stdout()),
@@ -274,9 +304,9 @@ fn print_last(
           old.number,
           new.number
         )?;
-        display_diff(&old.path, &new.path, report)?;
+        hidden += display_diff(&old.path, &new.path, report, options)?;
       }
-      Ok(())
+      print_hidden_note(hidden)
     },
     OutputFormat::Json => {
       let transitions = transitions
@@ -300,7 +330,7 @@ fn print_last(
 ///
 /// # Returns
 ///
-/// `Ok(())` once the diff is rendered.
+/// The number of package diffs hidden by `options`.
 ///
 /// # Errors
 ///
@@ -309,7 +339,8 @@ fn display_diff(
   old_path: &Path,
   new_path: &Path,
   report: &DiffReport,
-) -> eyre::Result<()> {
+  options: RenderOptions,
+) -> eyre::Result<usize> {
   let mut out = WriteFmt(io::stdout());
 
   tracing::info!("rendering diff report");
@@ -331,10 +362,32 @@ fn display_diff(
       .display(),
   )?;
 
-  dix::write_diff_report(&mut out, report)?;
+  let hidden = dix::write_diff_report(&mut out, report, options)?;
 
   tracing::info!("diff report rendered");
 
+  Ok(hidden)
+}
+
+/// Prints a note about the `hidden` package diffs to stdout, if there are any.
+///
+/// # Returns
+///
+/// `Ok(())` once the note is printed.
+///
+/// # Errors
+///
+/// Returns an error if the output cannot be written.
+fn print_hidden_note(hidden: usize) -> eyre::Result<()> {
+  if hidden > 0 {
+    writeln!(
+      WriteFmt(io::stdout()),
+      "\n{header}: {hidden} hidden {hint}",
+      header = "NOTE".bold(),
+      hidden = hidden.yellow(),
+      hint = "(--full to show)".dim(),
+    )?;
+  }
   Ok(())
 }
 
@@ -376,6 +429,7 @@ mod tests {
       old_path: PathBuf::from("/old"),
       new_path: PathBuf::from("/new"),
       output:   OutputFormat::Human,
+      render:   RenderArgs::default(),
     });
   }
 
@@ -394,6 +448,7 @@ mod tests {
       to:      None,
       profile: PathBuf::from(SYSTEM_PROFILE),
       output:  OutputFormat::Human,
+      render:  RenderArgs::default(),
     });
 
     let cli = Cli::try_parse_from([
@@ -413,6 +468,7 @@ mod tests {
       to:      None,
       profile: PathBuf::from("/my/profile"),
       output:  OutputFormat::Json,
+      render:  RenderArgs::default(),
     });
   }
 

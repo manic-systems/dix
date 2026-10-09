@@ -46,6 +46,11 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are
   now always required.
 - Logs are now written to stderr instead of stdout.
+- Packages that only changed in amount or size are hidden, and a note at the
+  end of the output says how many. Pass `--full` to `dix diff` or `dix last`
+  to list them.
+- **Breaking:** `write_diff_report` takes a `RenderOptions` argument and
+  returns the number of hidden package diffs instead of the number written.
 - **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
   serializes an already queried report instead of querying and printing it.
 
