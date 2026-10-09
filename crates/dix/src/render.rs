@@ -98,8 +98,13 @@ fn render_diffs(
         StatusGroup::Removed => "REMOVED",
       }
       .bold();
+      let count = diffs
+        .iter()
+        .filter(|other| status_group(other.status) == group)
+        .count();
+      let count = format!("({count})");
 
-      writeln!(writer, "{header}")?;
+      writeln!(writer, "{header} {count}", count = count.dim())?;
       last_status_group = Some(group);
     }
 
