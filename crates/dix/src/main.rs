@@ -15,6 +15,8 @@ use std::{
     Path,
     PathBuf,
   },
+  thread,
+  time::Duration,
 };
 
 use clap::Parser as _;
@@ -412,15 +414,32 @@ fn display_diff(
 ///
 /// Returns an error if the output cannot be written.
 fn print_hidden_note(hidden: usize) -> eyre::Result<()> {
-  if hidden > 0 {
-    writeln!(
-      WriteFmt(io::stdout()),
-      "\n{header}: {hidden} hidden {hint}",
-      header = "NOTE".bold(),
-      hidden = hidden.yellow(),
-      hint = "(--full to show)".dim(),
-    )?;
+  if hidden == 0 {
+    return Ok(());
   }
+
+  let note = |count: &dyn fmt::Display| {
+    format!(
+      "{header}: {count} hidden {hint}",
+      header = "NOTE".bold(),
+      count = count.yellow(),
+      hint = "(--full to show)".dim(),
+    )
+  };
+  let mut out = io::stdout().lock();
+  writeln!(out)?;
+
+  // Six seven.
+  if hidden == 67 && yansi::is_enabled() && out.is_terminal() {
+    for frame in ["⁶₇", "₆⁷"].iter().cycle().take(8) {
+      write!(out, "\r{}", note(frame))?;
+      out.flush()?;
+      thread::sleep(Duration::from_millis(300));
+    }
+    write!(out, "\r")?;
+  }
+
+  writeln!(out, "{}", note(&hidden))?;
   Ok(())
 }
 
