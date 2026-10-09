@@ -30,6 +30,7 @@ pub use report::{
   PackageSizeDelta,
   PathStats,
   diff_store_snapshots,
+  query_adjacent_diff_reports,
   query_diff_report,
 };
 

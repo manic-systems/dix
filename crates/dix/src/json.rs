@@ -1,7 +1,4 @@
-use std::{
-  io::Write,
-  path::Path,
-};
+use std::io::Write;
 
 use eyre::{
   Result,
@@ -18,20 +15,18 @@ use crate::{
   Version,
   VersionAmount,
   VersionDiff,
-  query_diff_report,
 };
 
 /// Writes the diff report as JSON.
 ///
+/// # Returns
+///
+/// `Ok(())` once the report is written to `out`.
+///
 /// # Errors
 ///
-/// Returns an error if querying the diff report or writing JSON fails.
-pub fn display_diff(path_old: &Path, path_new: &Path) -> Result<()> {
-  let report = query_diff_report(path_old, path_new)?;
-  generate_diff(&mut std::io::stdout(), &report)
-}
-
-fn generate_diff(out: &mut dyn Write, report: &DiffReport) -> Result<()> {
+/// Returns an error if writing JSON fails.
+pub fn write_report(out: impl Write, report: &DiffReport) -> Result<()> {
   serde_json::to_writer(out, &JsonReport::from(report))
     .context("Failed to write json output.")
 }
@@ -285,7 +280,7 @@ mod tests {
     );
 
     let mut actual_output = Vec::new();
-    generate_diff(&mut actual_output, &report).unwrap();
+    write_report(&mut actual_output, &report).unwrap();
     let actual_output = String::from_utf8(actual_output).unwrap();
     assert_eq!(expected_output, &actual_output);
   }
