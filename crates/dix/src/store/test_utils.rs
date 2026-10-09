@@ -410,6 +410,25 @@ mod tests {
   }
 
   #[test]
+  fn test_snapshot_of_unregistered_path_fails() {
+    let db = create_simple_test_db().unwrap();
+    let db_path = db.db_path().to_string_lossy().to_string();
+    // Exists on disk, but was never registered.
+    let unregistered =
+      db.resolve_fixture_path(&fixtures::store_path("unregistered-1.0"));
+    fs::create_dir_all(&unregistered).unwrap();
+
+    let mut conn = DbConnection::new(&db_path);
+    conn.connect().unwrap();
+    let error =
+      crate::snapshot::query_store_snapshot_with_backend(&conn, &unregistered)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("is not a valid store path"));
+    conn.close().unwrap();
+  }
+
+  #[test]
   fn test_db_query_closure_path_info() {
     let db = create_simple_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();

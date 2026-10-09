@@ -3,6 +3,7 @@ use std::path::Path;
 use eyre::{
   Context as _,
   Result,
+  bail,
 };
 
 use crate::{
@@ -41,7 +42,8 @@ pub fn query_store_snapshot(
 ///
 /// # Errors
 ///
-/// Returns an error if the backend cannot query the path.
+/// Returns an error if the backend cannot query the path, or the path is not
+/// a valid store path.
 pub fn query_store_snapshot_with_backend(
   backend: &dyn StoreBackend,
   path: &Path,
@@ -50,6 +52,10 @@ pub fn query_store_snapshot_with_backend(
   let closure = backend.query_closure_path_info(path).with_context(|| {
     format!("failed to query closure path info of '{}'", path.display())
   })?;
+  // The closure of a valid path contains at least the path itself.
+  if closure.is_empty() {
+    bail!("'{}' is not a valid store path", path.display());
+  }
 
   tracing::debug!(path = %path.display(), "querying system derivations");
   let selected = backend.query_system_derivations(path).with_context(|| {
