@@ -5,58 +5,27 @@ A blazingly fast tool to diff Nix related things.
 Currently only supports closures (a derivation graph, such as a system build or
 package).
 
-![output of `dix /nix/var/nix/profiles/system-69-link/ /run/current-system`](.github/dix.png)
+![output of `dix diff /nix/var/nix/profiles/system-69-link/ /run/current-system`](.github/dix.png)
 
 ## Usage
 ```bash
 $ dix --help
 Diff Nix
 
-Usage: dix [OPTIONS] <OLD_PATH> <NEW_PATH>
+Usage: dix [OPTIONS] <COMMAND>
 
-Arguments:
-  <OLD_PATH>
-
-
-  <NEW_PATH>
-
+Commands:
+  diff  Show the differences between two store paths
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -v, --verbose...
-          Increase logging verbosity
+  -v, --verbose...    Increase logging verbosity
+  -q, --quiet...      Decrease logging verbosity
+      --color <WHEN>  Controls when to use color [default: auto] [possible values: auto, always, never]
+  -h, --help          Print help
+  -V, --version       Print version
 
-  -q, --quiet...
-          Decrease logging verbosity
-
-      --color <WHEN>
-          Controls when to use color
-
-          [default: auto]
-          [possible values: auto, always, never]
-
-      --force-correctness
-          Fall back to a backend chain that skips SQLite immutable mode.
-
-          This is relevant if the output of dix is to be used for more critical applications and not just as human-readable overview.
-
-          The default backend falls back to opening Nix's SQLite database with `?immutable=1` if the normal connection fails. That is faster than Nix commands, but can be inaccurate if the database is being written to at the same time.
-
-      --output <OUTPUT>
-          Select the output format to use
-
-          Possible values:
-          - human: Output in the default dix format highlighting version changes
-          - json:  Display the output as JSON for machine parsing (requires `json` feature)
-
-          [default: human]
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-  -V, --version
-          Print version
-
-$ dix /nix/var/profiles/system-69-link /run/current-system
+$ dix diff /nix/var/profiles/system-69-link /run/current-system
 ```
 
 # Usage in CI
