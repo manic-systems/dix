@@ -10,6 +10,9 @@ This is a changelog of the `dix` repository. It follows the
 
 ### Fixed
 
+- Querying a path that is not a valid store path, e.g. one that exists on disk
+  but was never registered, now fails instead of producing an empty closure.
+
 ### Changed
 
 - **Breaking:** Diffing moved into the `diff` subcommand, so `dix <OLD> <NEW>`
