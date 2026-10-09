@@ -13,19 +13,18 @@ categories.workspace = true
 [dependencies]
 dix-diff = { workspace = true }
 
-clap                = { workspace = true }
-clap-verbosity-flag = { workspace = true }
-diff                = { workspace = true }
-eyre                = { workspace = true }
-itertools           = { workspace = true }
-rusqlite            = { workspace = true }
-serde               = { workspace = true }
-serde_json          = { workspace = true }
-size                = { workspace = true }
-tracing             = { workspace = true }
-tracing-subscriber  = { workspace = true }
-unicode-width       = { workspace = true }
-yansi               = { workspace = true }
+clap               = { workspace = true }
+diff               = { workspace = true }
+eyre               = { workspace = true }
+itertools          = { workspace = true }
+rusqlite           = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+size               = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+unicode-width      = { workspace = true }
+yansi              = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

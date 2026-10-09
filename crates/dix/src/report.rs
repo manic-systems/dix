@@ -199,6 +199,12 @@ impl DiffReport {
     self.path_stats
   }
 
+  /// Whether the closures differ. See [`PathStats::has_changes`].
+  #[must_use]
+  pub const fn has_changes(&self) -> bool {
+    self.path_stats.has_changes()
+  }
+
   #[must_use]
   pub const fn size_old(&self) -> Size {
     self.size_old
@@ -293,6 +299,12 @@ impl PathStats {
   #[must_use]
   pub const fn removed_count(self) -> usize {
     self.removed
+  }
+
+  /// Whether the closures differ, i.e. any store path was added or removed.
+  #[must_use]
+  pub const fn has_changes(self) -> bool {
+    self.added > 0 || self.removed > 0
   }
 
   #[cfg(test)]
@@ -427,7 +439,8 @@ struct ParsedStorePath {
   version: Option<String>,
 }
 
-/// Queries Nix store data and builds a pure diff report.
+/// Queries Nix store data and builds a pure diff report. Paths that resolve to
+/// the same store path are queried once.
 ///
 /// # Errors
 ///
@@ -442,11 +455,19 @@ pub fn query_diff_report(
     "starting diff report computation"
   );
 
+  // Identical roots have identical closures.
+  let same_root = matches!(
+    (path_old.canonicalize(), path_new.canonicalize()),
+    (Ok(old), Ok(new)) if old == new
+  );
   let (old, new) = CombinedStoreBackend::query_default(|backend| {
-    Ok((
-      query_store_snapshot_with_backend(backend, path_old)?,
-      query_store_snapshot_with_backend(backend, path_new)?,
-    ))
+    let old = query_store_snapshot_with_backend(backend, path_old)?;
+    let new = if same_root {
+      old.clone()
+    } else {
+      query_store_snapshot_with_backend(backend, path_new)?
+    };
+    Ok((old, new))
   })?;
   let report = diff_store_snapshots(&old, &new);
   let path_stats = report.path_stats();

@@ -17,21 +17,20 @@ version      = "2.2.0"
 # strips the local path, so release `dix-diff` before `dix`.
 dix-diff = { path = "crates/dix-diff", version = "2.1.0" }
 
-clap                = { features = [ "derive" ], version = "4.5.37" }
-clap-verbosity-flag = "3.0.2"
-diff                = "0.1.13"
-eyre                = "0.6"
-itertools           = "0.15.0"
-proptest            = "1.6.0"
-rusqlite            = { default-features = false, features = [ "bundled", "cache" ], version = "0.40.0" }
-serde               = { features = [ "derive" ], version = "1.0.228" }
-serde_json          = "1.0.149"
-size                = "0.5.0"
-tempfile            = "3.10.0"
-tracing             = { default-features = false, features = [ "std" ], version = "0.1" }
-tracing-subscriber  = { features = [ "env-filter" ], version = "0.3" }
-unicode-width       = "0.2.0"
-yansi               = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
+clap               = { features = [ "derive" ], version = "4.5.37" }
+diff               = "0.1.13"
+eyre               = "0.6"
+itertools          = "0.15.0"
+proptest           = "1.6.0"
+rusqlite           = { default-features = false, features = [ "bundled", "cache" ], version = "0.40.0" }
+serde              = { features = [ "derive" ], version = "1.0.228" }
+serde_json         = "1.0.149"
+size               = "0.5.0"
+tempfile           = "3.10.0"
+tracing            = { default-features = false, features = [ "std" ], version = "0.1" }
+tracing-subscriber = { features = [ "env-filter" ], version = "0.3" }
+unicode-width      = "0.2.0"
+yansi              = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
 
 # See:
 #  <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>

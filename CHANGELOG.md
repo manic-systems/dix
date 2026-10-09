@@ -23,6 +23,11 @@ This is a changelog of the `dix` repository. It follows the
 - `StorePath`, `StorePathInfo` and `StoreSnapshot` now implement
   `Serialize`/`Deserialize`. `SnapshotDocument::from_json` rejects unknown
   format versions before parsing anything else.
+- `dix diff` and `dix last` take `--exit-code`, which makes them exit with 1 if
+  the compared closures differ, and `-q`/`--quiet`, which also prints
+  nothing.
+  `DiffReport::has_changes` and `PathStats::has_changes` expose the same check
+  in the library.
 
 ### Fixed
 
@@ -56,6 +61,9 @@ This is a changelog of the `dix` repository. It follows the
   returns the number of hidden package diffs instead of the number written.
 - **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
   serializes an already queried report instead of querying and printing it.
+- **Breaking:** Errors now exit with 2 instead of 1, since `--exit-code` uses 1
+  to report that the compared closures differ.
+- **Breaking:** `-q`/`--quiet` no longer decreases logging verbosity, and instead means `--quiet` of `dix diff` and `dix last`.
 
 ## 2.2.0
 

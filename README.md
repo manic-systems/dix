@@ -22,11 +22,12 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -v, --verbose...    Increase logging verbosity
-  -q, --quiet...      Decrease logging verbosity
       --color <WHEN>  Controls when to use color [default: auto] [possible values: auto, always, never]
+  -v, --verbose...    Increase logging verbosity
   -h, --help          Print help
   -V, --version       Print version
+
+Exit status is 0 if the closures are the same, 1 if different, 2 if trouble. Without --exit-code or --quiet, differences also exit with 0.
 
 $ dix diff /nix/var/profiles/system-69-link /run/current-system
 $ dix last
@@ -37,7 +38,7 @@ $ dix last --from 300 --to 320
 
 `last` shows what changed from the previous generation to the current one.
 `last N` shows the N most recent changes leading up to the current generation,
-comparing each generation with its predecessor, where N is a positive integer. 
+comparing each generation with its predecessor, where N is a positive integer.
 If fewer changes are available, it shows all available changes.
 Missing generations, such as those removed by garbage collection, are skipped.
 

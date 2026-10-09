@@ -15,6 +15,7 @@ use std::{
     Path,
     PathBuf,
   },
+  process::ExitCode,
   thread,
   time::Duration,
 };
@@ -25,7 +26,10 @@ use dix::{
   RenderOptions,
   json,
 };
-use eyre::eyre;
+use eyre::{
+  WrapErr as _,
+  eyre,
+};
 use size::Size;
 use yansi::Paint as _;
 
@@ -44,14 +48,26 @@ impl<W: io::Write> fmt::Write for WriteFmt<W> {
   }
 }
 
+/// Describes the exit status, shown after the help of commands that compare.
+const EXIT_STATUS_HELP: &str =
+  "Exit status is 0 if the closures are the same, 1 if different, 2 if \
+   trouble. Without --exit-code or --quiet, differences also exit with 0.";
+
 #[derive(clap::Parser, Debug)]
-#[command(version, about)]
+#[command(version, about, after_help = EXIT_STATUS_HELP)]
 struct Cli {
   #[command(subcommand)]
   command: Command,
 
-  #[command(flatten)]
-  verbose: clap_verbosity_flag::Verbosity,
+  /// Increase logging verbosity.
+  #[arg(
+    short,
+    long,
+    action = clap::ArgAction::Count,
+    global = true,
+    display_order = 100,
+  )]
+  verbose: u8,
 
   /// Controls when to use color.
   #[arg(
@@ -59,6 +75,7 @@ struct Cli {
       default_value_t = clap::ColorChoice::Auto,
       value_name = "WHEN",
       global = true,
+      display_order = 100,
   )]
   color: clap::ColorChoice,
 }
@@ -66,6 +83,7 @@ struct Cli {
 #[derive(clap::Subcommand, Debug, PartialEq, Eq)]
 enum Command {
   /// Show the differences between two store paths.
+  #[command(after_help = EXIT_STATUS_HELP)]
   Diff {
     old_path: PathBuf,
     new_path: PathBuf,
@@ -76,8 +94,12 @@ enum Command {
 
     #[command(flatten)]
     render: RenderArgs,
+
+    #[command(flatten)]
+    status: StatusArgs,
   },
   /// Show successive changes ending at the current profile generation.
+  #[command(after_help = EXIT_STATUS_HELP)]
   Last {
     /// Number of transitions to show.
     #[arg(default_value_t = NonZeroUsize::MIN)]
@@ -105,6 +127,9 @@ enum Command {
 
     #[command(flatten)]
     render: RenderArgs,
+
+    #[command(flatten)]
+    status: StatusArgs,
   },
   /// Print the closure of a store path as a versioned JSON snapshot.
   Snapshot { path: PathBuf },
@@ -147,6 +172,35 @@ impl From<RenderArgs> for RenderOptions {
   }
 }
 
+/// Options for signalling differences through the exit status.
+#[derive(clap::Args, Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct StatusArgs {
+  /// Exit with 1 if the compared closures differ, and 0 if they do not.
+  #[arg(long)]
+  exit_code: bool,
+
+  /// Print nothing. Implies --exit-code.
+  #[arg(short, long)]
+  quiet: bool,
+}
+
+impl StatusArgs {
+  /// Selects the format to print the comparison in, or `None` to print
+  /// nothing.
+  fn output(self, format: OutputFormat) -> Option<OutputFormat> {
+    (!self.quiet).then_some(format)
+  }
+
+  /// Maps whether the compared closures `changed` to the exit status.
+  const fn exit_status(self, changed: bool) -> ExitCode {
+    if changed && (self.exit_code || self.quiet) {
+      ExitCode::FAILURE
+    } else {
+      ExitCode::SUCCESS
+    }
+  }
+}
+
 fn parse_size(value: &str) -> Result<Size, String> {
   let size = value
     .parse::<Size>()
@@ -166,7 +220,7 @@ enum OutputFormat {
   Json,
 }
 
-fn main() -> eyre::Result<()> {
+fn main() -> ExitCode {
   let Cli {
     command,
     verbose,
@@ -182,24 +236,16 @@ fn main() -> eyre::Result<()> {
   tracing_subscriber::fmt()
     .with_env_filter(
       tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(match verbose.log_level_filter() {
-          clap_verbosity_flag::log::LevelFilter::Off
-          | clap_verbosity_flag::log::LevelFilter::Error => {
-            tracing::Level::ERROR.into()
-          },
-          clap_verbosity_flag::log::LevelFilter::Warn => {
-            tracing::Level::WARN.into()
-          },
-          clap_verbosity_flag::log::LevelFilter::Info => {
-            tracing::Level::INFO.into()
-          },
-          clap_verbosity_flag::log::LevelFilter::Debug => {
-            tracing::Level::DEBUG.into()
-          },
-          clap_verbosity_flag::log::LevelFilter::Trace => {
-            tracing::Level::TRACE.into()
-          },
-        })
+        .with_default_directive(
+          match verbose {
+            0 => tracing::Level::ERROR,
+            1 => tracing::Level::WARN,
+            2 => tracing::Level::INFO,
+            3 => tracing::Level::DEBUG,
+            _ => tracing::Level::TRACE,
+          }
+          .into(),
+        )
         .from_env_lossy(),
     )
     .with_writer(io::stderr)
@@ -208,13 +254,17 @@ fn main() -> eyre::Result<()> {
     .without_time()
     .init();
 
-  match command {
+  let result = match command {
     Command::Diff {
       old_path,
       new_path,
       output,
       render,
-    } => print_diff(&old_path, &new_path, output, render.into()),
+      status,
+    } => {
+      print_diff(&old_path, &new_path, status.output(output), render.into())
+        .map(|changed| status.exit_status(changed))
+    },
     Command::Last {
       count,
       all,
@@ -223,16 +273,32 @@ fn main() -> eyre::Result<()> {
       profile,
       output,
       render,
+      status,
     } => {
       let span = if all || from.is_some() || to.is_some() {
         Span::Range { from, to }
       } else {
         Span::Latest(count)
       };
-      print_last(&profile, span, output, render.into())
+      print_last(&profile, span, status.output(output), render.into())
+        .map(|changed| status.exit_status(changed))
     },
-    Command::Snapshot { path } => print_snapshot(&path),
-  }
+    Command::Snapshot { path } => {
+      print_snapshot(&path).map(|()| ExitCode::SUCCESS)
+    },
+  };
+
+  // std flushes stdout once `main` returns, but ignores errors by then. Output
+  // without a trailing newline, like JSON, may still be buffered here.
+  let result = result.and_then(|status| {
+    io::stdout().flush()?;
+    Ok(status)
+  });
+
+  result.unwrap_or_else(|error| {
+    let _ = writeln!(io::stderr(), "Error: {error:?}");
+    ExitCode::from(2)
+  })
 }
 
 /// Prints the snapshot of `path` as JSON to stdout.
@@ -252,24 +318,28 @@ fn print_snapshot(path: &Path) -> eyre::Result<()> {
   Ok(())
 }
 
-/// Prints the diff between `old_path` and `new_path` to stdout.
+/// Prints the diff between `old_path` and `new_path` to stdout in `output`, or
+/// nothing if `output` is `None`.
 ///
 /// # Returns
 ///
-/// `Ok(())` once the diff is printed.
+/// Whether the closures of `old_path` and `new_path` differ.
 ///
 /// # Errors
 ///
-/// Returns an error if a path does not exist, the store cannot be queried, or
-/// the output cannot be written.
+/// Returns an error if a path does not exist or cannot be accessed, the store
+/// cannot be queried, or the output cannot be written.
 fn print_diff(
   old_path: &Path,
   new_path: &Path,
-  output: OutputFormat,
+  output: Option<OutputFormat>,
   options: RenderOptions,
-) -> eyre::Result<()> {
+) -> eyre::Result<bool> {
   for (name, path) in [("old", old_path), ("new", new_path)] {
-    if !path.exists() {
+    let exists = path.try_exists().wrap_err_with(|| {
+      format!("failed to access {name} profile path: {}", path.display())
+    })?;
+    if !exists {
       return Err(eyre!(
         "{name} profile path does not exist: {}",
         path.display()
@@ -281,12 +351,14 @@ fn print_diff(
 
   let report = dix::query_diff_report(old_path, new_path)?;
   match output {
-    OutputFormat::Human => {
+    None => {},
+    Some(OutputFormat::Human) => {
       let hidden = display_diff(old_path, new_path, &report, options)?;
-      print_hidden_note(hidden)
+      print_hidden_note(hidden)?;
     },
-    OutputFormat::Json => json::write_report(io::stdout(), &report),
+    Some(OutputFormat::Json) => json::write_report(io::stdout(), &report)?,
   }
+  Ok(report.has_changes())
 }
 
 /// One transition in the array printed by `dix last --output json`.
@@ -305,11 +377,11 @@ struct JsonTransition<'a> {
 }
 
 /// Prints the diff of each transition between the generations of `profile`
-/// selected by `span` to stdout.
+/// selected by `span` to stdout in `output`, or nothing if `output` is `None`.
 ///
 /// # Returns
 ///
-/// `Ok(())` once all transitions are printed.
+/// Whether the closures of any transition differ.
 ///
 /// # Errors
 ///
@@ -318,19 +390,21 @@ struct JsonTransition<'a> {
 fn print_last(
   profile: &Path,
   span: Span,
-  output: OutputFormat,
+  output: Option<OutputFormat>,
   options: RenderOptions,
-) -> eyre::Result<()> {
+) -> eyre::Result<bool> {
   let generations = select_generations(profile, span)?;
   let paths = generations
     .iter()
     .map(|generation| generation.path.as_path())
     .collect::<Vec<_>>();
   let reports = dix::query_adjacent_diff_reports(&paths)?;
+  let changed = reports.iter().any(DiffReport::has_changes);
   let transitions = generations.array_windows().zip(&reports);
 
   match output {
-    OutputFormat::Human => {
+    None => {},
+    Some(OutputFormat::Human) => {
       let mut hidden = 0;
       for ([old, new], report) in transitions {
         writeln!(
@@ -341,9 +415,9 @@ fn print_last(
         )?;
         hidden += display_diff(&old.path, &new.path, report, options)?;
       }
-      print_hidden_note(hidden)
+      print_hidden_note(hidden)?;
     },
-    OutputFormat::Json => {
+    Some(OutputFormat::Json) => {
       let transitions = transitions
         .map(|([old, new], report)| {
           JsonTransition {
@@ -355,9 +429,10 @@ fn print_last(
           }
         })
         .collect::<Vec<_>>();
-      Ok(serde_json::to_writer(io::stdout(), &transitions)?)
+      serde_json::to_writer(io::stdout(), &transitions)?;
     },
   }
+  Ok(changed)
 }
 
 /// Renders `report`, the diff between `old_path` and `new_path`, for humans to
@@ -482,6 +557,7 @@ mod tests {
       new_path: PathBuf::from("/new"),
       output:   OutputFormat::Human,
       render:   RenderArgs::default(),
+      status:   StatusArgs::default(),
     });
   }
 
@@ -501,6 +577,7 @@ mod tests {
       profile: PathBuf::from(SYSTEM_PROFILE),
       output:  OutputFormat::Human,
       render:  RenderArgs::default(),
+      status:  StatusArgs::default(),
     });
 
     let cli = Cli::try_parse_from([
@@ -521,6 +598,7 @@ mod tests {
       profile: PathBuf::from("/my/profile"),
       output:  OutputFormat::Json,
       render:  RenderArgs::default(),
+      status:  StatusArgs::default(),
     });
   }
 
