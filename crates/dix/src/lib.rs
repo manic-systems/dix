@@ -24,6 +24,7 @@ mod render;
 pub use render::write_diff_report;
 pub mod report;
 pub use report::{
+  ChangeKind,
   DerivationSelectionStatus,
   DiffReport,
   PackageDiff,
