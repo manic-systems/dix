@@ -4,13 +4,17 @@ This is a changelog of the `dix` repository. It follows the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 2.2.1 (Unreleased)
+## 3.0.0 (Unreleased)
 
 ### Added
 
 ### Fixed
 
 ### Changed
+
+- **Breaking:** Diffing moved into the `diff` subcommand, so `dix <OLD> <NEW>`
+  is now `dix diff <OLD> <NEW>`. `--force-correctness` and `--output` are
+  options of `diff`.
 
 ## 2.2.0
 

@@ -31,8 +31,8 @@ impl<W: io::Write> fmt::Write for WriteFmt<W> {
 #[derive(clap::Parser, Debug)]
 #[command(version, about)]
 struct Cli {
-  old_path: PathBuf,
-  new_path: PathBuf,
+  #[command(subcommand)]
+  command: Command,
 
   #[command(flatten)]
   verbose: clap_verbosity_flag::Verbosity,
@@ -45,22 +45,31 @@ struct Cli {
       global = true,
   )]
   color: clap::ColorChoice,
+}
 
-  /// Fall back to a backend chain that skips `SQLite` immutable mode.
-  ///
-  /// This is relevant if the output of dix is to be used for more
-  /// critical applications and not just as human-readable overview.
-  ///
-  /// The default backend falls back to opening Nix's `SQLite` database with
-  /// `?immutable=1` if the normal connection fails. That is faster than Nix
-  /// commands, but can be inaccurate if the database is being written to at
-  /// the same time.
-  #[arg(long, default_value_t = false, global = true)]
-  force_correctness: bool,
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+  /// Show the differences between two store paths.
+  Diff {
+    old_path: PathBuf,
+    new_path: PathBuf,
 
-  /// Select the output format to use.
-  #[arg(long, value_enum, default_value_t = OutputFormat::Human, global = true)]
-  output: OutputFormat,
+    /// Fall back to a backend chain that skips `SQLite` immutable mode.
+    ///
+    /// This is relevant if the output of dix is to be used for more
+    /// critical applications and not just as human-readable overview.
+    ///
+    /// The default backend falls back to opening Nix's `SQLite` database with
+    /// `?immutable=1` if the normal connection fails. That is faster than Nix
+    /// commands, but can be inaccurate if the database is being written to at
+    /// the same time.
+    #[arg(long, default_value_t = false)]
+    force_correctness: bool,
+
+    /// Select the output format to use.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    output: OutputFormat,
+  },
 }
 
 /// Determines the output format to be used by dix.
@@ -74,13 +83,16 @@ enum OutputFormat {
 
 fn main() -> eyre::Result<()> {
   let Cli {
-    old_path,
-    new_path,
+    command,
     verbose,
     color,
+  } = Cli::parse();
+  let Command::Diff {
+    old_path,
+    new_path,
     force_correctness,
     output,
-  } = Cli::parse();
+  } = command;
 
   tracing::debug!(
     old_path = %old_path.display(),
@@ -225,4 +237,24 @@ fn should_style() -> bool {
 
   // Style if it is a terminal.
   io::stdout().is_terminal()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn diff_subcommand_parses() {
+    let cli = Cli::try_parse_from(["dix", "diff", "/old", "/new"]).unwrap();
+    let Command::Diff {
+      old_path, new_path, ..
+    } = cli.command;
+    assert_eq!(old_path, PathBuf::from("/old"));
+    assert_eq!(new_path, PathBuf::from("/new"));
+  }
+
+  #[test]
+  fn bare_paths_are_rejected() {
+    assert!(Cli::try_parse_from(["dix", "/old", "/new"]).is_err());
+  }
 }
