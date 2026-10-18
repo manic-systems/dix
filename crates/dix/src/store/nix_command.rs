@@ -64,6 +64,7 @@ fn run(command: &mut Command) -> Result<String> {
 
   String::from_utf8(output.stdout)
     .with_context(|| format!("{command:?} printed invalid UTF-8"))
+    .erase()
 }
 
 /// Parses Nix command output listing one store path per line.

@@ -132,7 +132,9 @@ impl SnapshotDocument {
       );
     }
 
-    serde_json::from_str(input).context("failed to parse dix snapshot document")
+    serde_json::from_str(input)
+      .context("failed to parse dix snapshot document")
+      .erase()
   }
 }
 

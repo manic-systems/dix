@@ -151,7 +151,7 @@ fn close_inner_connection(
   })?;
   conn.close().map_err(|(conn_old, err)| {
     *maybe_conn = Some(conn_old);
-    Report::from_error(err).context("failed to close Nix database")
+    Report::new(err).context("failed to close Nix database")
   })
 }
 

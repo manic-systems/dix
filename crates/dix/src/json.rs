@@ -30,6 +30,7 @@ use crate::{
 pub fn write_report(out: impl Write, report: &DiffReport) -> Result<()> {
   serde_json::to_writer(out, &JsonReport::from(report))
     .context("Failed to write json output.")
+    .erase()
 }
 
 #[derive(Serialize)]

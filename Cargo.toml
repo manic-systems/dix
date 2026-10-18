@@ -19,7 +19,7 @@ dix-diff = { path = "crates/dix-diff", version = "2.1.0" }
 
 diff               = "0.1.13"
 itertools          = "0.15.0"
-misstep            = { features = [ "color", "pretty" ], version = "0.3.0" }
+misstep            = { features = [ "color", "pretty" ], version = "0.4.1" }
 pound              = "0.5.1"
 proptest           = "1.6.0"
 rusqlite           = { default-features = false, features = [ "bundled", "cache" ], version = "0.40.0" }
