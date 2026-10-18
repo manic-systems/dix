@@ -24,6 +24,7 @@ mod render;
 pub use render::{
   RenderOptions,
   write_diff_report,
+  write_hidden_note,
 };
 pub mod report;
 pub use report::{

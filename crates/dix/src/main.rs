@@ -15,8 +15,6 @@ use std::{
     Path,
     PathBuf,
   },
-  thread,
-  time::Duration,
 };
 
 use dix::{
@@ -277,7 +275,8 @@ fn print_diff(
   match output {
     OutputFormat::Human => {
       let hidden = display_diff(old_path, new_path, &report, options)?;
-      print_hidden_note(hidden)
+      dix::write_hidden_note(&mut io::stdout().lock(), hidden, "--full")?;
+      Ok(())
     },
     OutputFormat::Json => json::write_report(io::stdout(), &report),
   }
@@ -335,7 +334,8 @@ fn print_last(
         )?;
         hidden += display_diff(&old.path, &new.path, report, options)?;
       }
-      print_hidden_note(hidden)
+      dix::write_hidden_note(&mut io::stdout().lock(), hidden, "--full")?;
+      Ok(())
     },
     OutputFormat::Json => {
       let transitions = transitions
@@ -396,45 +396,6 @@ fn display_diff(
   tracing::info!("diff report rendered");
 
   Ok(hidden)
-}
-
-/// Prints a note about the `hidden` package diffs to stdout, if there are any.
-///
-/// # Returns
-///
-/// `Ok(())` once the note is printed.
-///
-/// # Errors
-///
-/// Returns an error if the output cannot be written.
-fn print_hidden_note(hidden: usize) -> misstep::Result<()> {
-  if hidden == 0 {
-    return Ok(());
-  }
-
-  let note = |count: &dyn fmt::Display| {
-    format!(
-      "{header}: {count} hidden {hint}",
-      header = "NOTE".bold(),
-      count = count.yellow(),
-      hint = "(--full to show)".dim(),
-    )
-  };
-  let mut out = io::stdout().lock();
-  writeln!(out)?;
-
-  // Six seven.
-  if hidden == 67 && yansi::is_enabled() && out.is_terminal() {
-    for frame in ["⁶₇", "₆⁷"].iter().cycle().take(8) {
-      write!(out, "\r{}", note(frame))?;
-      out.flush()?;
-      thread::sleep(Duration::from_millis(300));
-    }
-    write!(out, "\r")?;
-  }
-
-  writeln!(out, "{}", note(&hidden))?;
-  Ok(())
 }
 
 // https://bixense.com/clicolors/

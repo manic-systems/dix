@@ -4,7 +4,13 @@ use std::{
     self,
     Write as _,
   },
+  io::{
+    self,
+    IsTerminal,
+  },
   num::NonZeroUsize,
+  thread,
+  time::Duration,
 };
 
 use dix_diff::VersionPiece;
@@ -86,6 +92,49 @@ pub fn write_diff_report(
   write_size_diff(writer, report.size_old(), report.size_new())?;
 
   Ok(hidden)
+}
+
+/// Writes a note about the `hidden` package diffs to the provided writer, if
+/// there are any. The note's hint names `flag` as the option that shows them.
+///
+/// # Returns
+///
+/// `Ok(())` once the note is written.
+///
+/// # Errors
+///
+/// Returns an error if writing to the output fails.
+pub fn write_hidden_note(
+  writer: &mut (impl io::Write + IsTerminal),
+  hidden: usize,
+  flag: &str,
+) -> io::Result<()> {
+  if hidden == 0 {
+    return Ok(());
+  }
+
+  let hint = format!("({flag} to show)");
+  let note = |count: &dyn fmt::Display| {
+    format!(
+      "{header}: {count} hidden {hint}",
+      header = "NOTE".bold(),
+      count = count.yellow(),
+      hint = hint.dim(),
+    )
+  };
+  writeln!(writer)?;
+
+  // Six seven.
+  if hidden == 67 && yansi::is_enabled() && writer.is_terminal() {
+    for frame in ["⁶₇", "₆⁷"].iter().cycle().take(8) {
+      write!(writer, "\r{}", note(frame))?;
+      writer.flush()?;
+      thread::sleep(Duration::from_millis(300));
+    }
+    write!(writer, "\r")?;
+  }
+
+  writeln!(writer, "{}", note(&hidden))
 }
 
 fn render_package_diffs(
