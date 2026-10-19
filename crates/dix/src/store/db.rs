@@ -10,10 +10,8 @@ use std::{
 };
 
 use misstep::{
-  Report,
   Result,
   ResultExt as _,
-  report,
 };
 use rusqlite::{
   Connection,
@@ -34,7 +32,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DbConnection {
   path: String,
-  conn: Option<Connection>,
+  conn: Connection,
 }
 
 impl Display for DbConnection {
@@ -44,49 +42,25 @@ impl Display for DbConnection {
 }
 
 impl DbConnection {
-  /// Create a new connection.
-  pub fn new(path: impl AsRef<str>) -> Self {
-    Self {
-      path: path.as_ref().to_owned(),
-      conn: None,
-    }
-  }
-
-  /// returns a reference to the inner connection
+  /// Opens a read-only connection to the database at `path`.
   ///
-  /// raises an error if the connection has not been established
-  fn get_inner(&self) -> Result<&Connection> {
-    self
-      .conn
-      .as_ref()
-      .ok_or_else(|| report!("Attempted to use database before connecting."))
+  /// # Errors
+  ///
+  /// Returns an error if the database cannot be opened or configured.
+  pub fn open(path: impl AsRef<str>) -> Result<Self> {
+    let path = path.as_ref().to_owned();
+    let conn = open_connection(&path)?;
+    Ok(Self { path, conn })
   }
 }
 
 impl StoreBackend for DbConnection {
-  fn connect(&mut self) -> Result<()> {
-    self.conn = Some(open_connection(&self.path)?);
-    Ok(())
-  }
-
-  fn connected(&self) -> bool {
-    self.conn.is_some()
-  }
-
-  fn close(&mut self) -> Result<()> {
-    close_inner_connection(&self.path, &mut self.conn)
-  }
-
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
-    query_store_paths(
-      self.get_inner()?,
-      queries::QUERY_SYSTEM_DERIVATIONS,
-      system,
-    )
+    query_store_paths(&self.conn, queries::QUERY_SYSTEM_DERIVATIONS, system)
   }
 
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
-    query_store_path_info(self.get_inner()?, path)
+    query_store_path_info(&self.conn, path)
   }
 }
 
@@ -140,19 +114,6 @@ fn open_connection(path: &str) -> Result<Connection> {
     )
     .with_context(|| format!("failed to cache Nix database at {path}"))?;
   Ok(inner)
-}
-
-fn close_inner_connection(
-  path: &str,
-  maybe_conn: &mut Option<Connection>,
-) -> Result<()> {
-  let conn = maybe_conn.take().ok_or_else(|| {
-    report!("Tried to close connection to {} that does not exist", path)
-  })?;
-  conn.close().map_err(|(conn_old, err)| {
-    *maybe_conn = Some(conn_old);
-    Report::new(err).context("failed to close Nix database")
-  })
 }
 
 fn query_store_paths(

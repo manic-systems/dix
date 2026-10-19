@@ -106,20 +106,6 @@ impl StorePathInfo {
 /// This allows us to construct a backend that can fall back
 /// to e.g. shell commands should something go wrong.
 pub trait StoreBackend: Display {
-  /// Opens any resources required by the backend.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the backend cannot be connected.
-  fn connect(&mut self) -> Result<()>;
-  /// Returns whether this backend is currently connected.
-  fn connected(&self) -> bool;
-  /// Closes resources held by the backend.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if resources cannot be closed cleanly.
-  fn close(&mut self) -> Result<()>;
   /// Queries derivations selected by a system profile.
   ///
   /// # Errors
@@ -138,7 +124,7 @@ pub trait StoreBackend: Display {
 /// combines multiple store backends by falling back to the next one if the
 /// current one fails.
 ///
-/// Queries try connected backends in order.
+/// Queries try backends in order.
 pub struct CombinedStoreBackend {
   /// The underlying store backend implementations.
   backends: Vec<Box<dyn StoreBackend>>,
@@ -150,36 +136,22 @@ impl CombinedStoreBackend {
     Self { backends }
   }
 
-  /// Connects the default backend, runs `query` on it, and closes it again.
+  /// Tries the sqlite database first, then falls back to Nix commands.
   ///
-  /// # Returns
-  ///
-  /// The result of `query`.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if no backend can be connected, `query` fails, or the
-  /// backend cannot be closed.
-  pub(crate) fn query_default<T>(
-    query: impl FnOnce(&Self) -> Result<T>,
-  ) -> Result<T> {
-    let mut backend = Self::default();
-    backend.connect()?;
-
-    let result = query(&backend);
-    let close_result = backend.close();
-
-    match result {
-      Ok(value) => {
-        close_result?;
-        Ok(value)
-      },
-      Err(error) => Err(error),
+  /// The database is never opened with `?immutable=1`, since that can silently
+  /// produce wrong results while Nix writes to it.
+  #[must_use]
+  pub fn open() -> Self {
+    let mut backends: Vec<Box<dyn StoreBackend>> = Vec::new();
+    match DbConnection::open(DATABASE_PATH) {
+      Ok(db) => backends.push(Box::new(db)),
+      Err(err) => warn!("Unable to open the Nix database, falling back: {err}"),
     }
+    backends.push(Box::new(CommandBackend));
+    Self::new(backends)
   }
 
-  // tries to execute a query until it succeeds or all connected backends have
-  // been tried
+  // tries to execute a query until it succeeds or all backends have been tried
   fn fallback_query<F, Ret>(&self, query: F, path: &Path) -> Result<Ret>
   where
     F: Fn(&dyn StoreBackend, &Path) -> Result<Ret>,
@@ -187,12 +159,6 @@ impl CombinedStoreBackend {
     let mut combined_err: Option<misstep::Report> = None;
     // attempt to cycle through backends until a successful query is made
     for (i, backend) in self.backends.iter().enumerate() {
-      if !backend.connected() {
-        warn!(
-          "Skipping backend {i} ({backend}) in query {path:?}: not connected"
-        );
-        continue;
-      }
       let res = query(backend.as_ref(), path);
       match res {
         Ok(_) => return res,
@@ -220,93 +186,7 @@ impl Display for CombinedStoreBackend {
   }
 }
 
-/// Tries the sqlite database first, then falls back to Nix commands.
-///
-/// The database is never opened with `?immutable=1`, since that can silently
-/// produce wrong results while Nix writes to it.
-impl Default for CombinedStoreBackend {
-  fn default() -> Self {
-    Self::new(vec![
-      Box::new(DbConnection::new(DATABASE_PATH)),
-      Box::new(CommandBackend),
-    ])
-  }
-}
-
 impl StoreBackend for CombinedStoreBackend {
-  /// connects to all backends. Returns an error if all backends fail
-  fn connect(&mut self) -> Result<()> {
-    tracing::debug!(
-      backend_count = self.backends.len(),
-      "connecting to store backends"
-    );
-    let mut combined_err: Option<misstep::Report> = None;
-    let mut connected_count = 0;
-    // connect, collecting the errors as we go
-    for (i, backend) in self.backends.iter_mut().enumerate() {
-      tracing::trace!(backend_index = i, backend = %backend, "attempting to connect to backend");
-      if let Err(err) = backend.connect() {
-        warn!(
-          "Unable to connect to store backend {i}: {backend}, trying next. \
-           (error: {err})"
-        );
-        combined_err = match combined_err {
-          Some(combined) => Some(combined.context(err)),
-          None => Some(err),
-        }
-      } else {
-        connected_count += 1;
-        tracing::debug!(backend_index = i, backend = %backend, "backend connected successfully");
-      }
-    }
-    tracing::info!(
-      connected_count = connected_count,
-      total_count = self.backends.len(),
-      "backend connection complete"
-    );
-    let any_succeeded = self.backends.iter().any(|f| f.connected());
-    // warn about encountered errors, even though there are fallbacks
-    if let Some(err) = &combined_err
-      && any_succeeded
-    {
-      warn!("Some backends failed to connect: {err}");
-    }
-    if any_succeeded {
-      Ok(())
-    } else {
-      combined_err =
-        combined_err.map(|err| err.context("All backends failed to connect."));
-      Err(combined_err.unwrap_or_else(|| report!("No backends to connect to.")))
-    }
-  }
-
-  /// True if any backend is connected.
-  fn connected(&self) -> bool {
-    self.backends.iter().any(|backend| backend.connected())
-  }
-
-  /// Closes all connected backends.
-  ///
-  /// If some fail to close, the combined error is returned.
-  fn close(&mut self) -> Result<()> {
-    let mut combined_err: Option<misstep::Report> = None;
-    for (i, backend) in self.backends.iter_mut().enumerate() {
-      if backend.connected()
-        && let Err(err) = backend.close()
-      {
-        warn!("Unable to close store backend {i}: {backend}. (error: {err})");
-        combined_err = match combined_err {
-          Some(combined) => Some(combined.context(err)),
-          None => Some(err),
-        };
-      }
-    }
-    combined_err.map_or_else(
-      || Ok(()),
-      |err| Err(err.context("One or more backends failed to close.")),
-    )
-  }
-
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     self.fallback_query(
       |backend, system| backend.query_system_derivations(system),
@@ -324,29 +204,20 @@ impl StoreBackend for CombinedStoreBackend {
 
 #[cfg(test)]
 mod test {
-  use std::{
-    cell::RefCell,
-    fmt,
-  };
+  use std::fmt;
 
   use super::*;
 
   struct MockStoreBackend {
-    name:         String,
-    connected:    bool,
-    fail_connect: bool,
-    fail_query:   bool,
-    query_called: RefCell<bool>,
+    name:       String,
+    fail_query: bool,
   }
 
   impl MockStoreBackend {
-    fn new(name: &str, fail_connect: bool, fail_query: bool) -> Self {
+    fn new(name: &str, fail_query: bool) -> Self {
       Self {
         name: name.to_string(),
-        connected: false,
-        fail_connect,
         fail_query,
-        query_called: RefCell::new(false),
       }
     }
   }
@@ -358,29 +229,10 @@ mod test {
   }
 
   impl StoreBackend for MockStoreBackend {
-    fn connect(&mut self) -> Result<()> {
-      if self.fail_connect {
-        Err(report!("Connection failed"))
-      } else {
-        self.connected = true;
-        Ok(())
-      }
-    }
-
-    fn connected(&self) -> bool {
-      self.connected
-    }
-
-    fn close(&mut self) -> Result<()> {
-      self.connected = false;
-      Ok(())
-    }
-
     fn query_system_derivations(
       &self,
       _system: &Path,
     ) -> Result<Vec<StorePath>> {
-      *self.query_called.borrow_mut() = true;
       if self.fail_query {
         Err(report!("Query failed"))
       } else {
@@ -392,7 +244,6 @@ mod test {
       &self,
       _path: &Path,
     ) -> Result<Vec<StorePathInfo>> {
-      *self.query_called.borrow_mut() = true;
       if self.fail_query {
         Err(report!("Query failed"))
       } else {
@@ -408,32 +259,10 @@ mod test {
   }
 
   #[test]
-  fn test_connect_fallback() {
-    let f1 = Box::new(MockStoreBackend::new("f1", true, false));
-    let f2 = Box::new(MockStoreBackend::new("f2", false, false));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    assert!(combined.connect().is_ok());
-    assert!(combined.connected());
-  }
-
-  #[test]
-  fn test_connect_all_fail() {
-    let f1 = Box::new(MockStoreBackend::new("f1", true, false));
-    let f2 = Box::new(MockStoreBackend::new("f2", true, false));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    assert!(combined.connect().is_err());
-    assert!(!combined.connected());
-  }
-
-  #[test]
   fn test_query_fallback() {
-    let f1 = Box::new(MockStoreBackend::new("f1", false, true));
-    let f2 = Box::new(MockStoreBackend::new("f2", false, false));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    combined.connect().unwrap();
+    let f1 = Box::new(MockStoreBackend::new("f1", true));
+    let f2 = Box::new(MockStoreBackend::new("f2", false));
+    let combined = CombinedStoreBackend::new(vec![f1, f2]);
 
     let res = test_utils::closure_size(&combined, Path::new("/dummy"));
     assert!(res.is_ok());
@@ -442,11 +271,9 @@ mod test {
 
   #[test]
   fn test_path_query_fallback() {
-    let f1 = Box::new(MockStoreBackend::new("f1", false, true));
-    let f2 = Box::new(MockStoreBackend::new("f2", false, false));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    combined.connect().unwrap();
+    let f1 = Box::new(MockStoreBackend::new("f1", true));
+    let f2 = Box::new(MockStoreBackend::new("f2", false));
+    let combined = CombinedStoreBackend::new(vec![f1, f2]);
 
     let res = combined.query_system_derivations(Path::new("/dummy"));
     assert!(res.is_ok());
@@ -454,36 +281,10 @@ mod test {
   }
 
   #[test]
-  fn test_query_skip_unconnected() {
-    let f1 = Box::new(MockStoreBackend::new("f1", true, false));
-    let f2 = Box::new(MockStoreBackend::new("f2", false, false));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    combined.connect().unwrap(); // f1 fails, f2 succeeds
-
-    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), Size::from_bytes(100));
-
-    let f1 = Box::new(MockStoreBackend::new("f1", true, false));
-    let f2 = Box::new(MockStoreBackend::new("f2", true, false));
-    let f3 = Box::new(MockStoreBackend::new("f3", false, false));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2, f3]);
-    combined.connect().unwrap();
-
-    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
-    assert_eq!(res.unwrap(), Size::from_bytes(100));
-    assert!(combined.connect().is_ok());
-    assert!(combined.connected());
-  }
-
-  #[test]
   fn test_query_all_fail() {
-    let f1 = Box::new(MockStoreBackend::new("f1", false, true));
-    let f2 = Box::new(MockStoreBackend::new("f2", false, true));
-    let mut combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    combined.connect().unwrap();
+    let f1 = Box::new(MockStoreBackend::new("f1", true));
+    let f2 = Box::new(MockStoreBackend::new("f2", true));
+    let combined = CombinedStoreBackend::new(vec![f1, f2]);
 
     let res = test_utils::closure_size(&combined, Path::new("/dummy"));
     assert!(res.is_err());

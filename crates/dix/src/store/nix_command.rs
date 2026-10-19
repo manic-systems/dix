@@ -119,22 +119,6 @@ fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
 }
 
 impl StoreBackend for CommandBackend {
-  /// Does nothing (we spawn a new process everytime).
-  fn connect(&mut self) -> Result<()> {
-    Ok(())
-  }
-
-  /// we don't really have a connection
-  /// always returns true
-  fn connected(&self) -> bool {
-    true
-  }
-
-  /// there is nothing to close
-  fn close(&mut self) -> Result<()> {
-    Ok(())
-  }
-
   fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
     parse_store_path_output(&run(
       Command::new("nix-store")

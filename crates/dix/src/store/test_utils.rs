@@ -420,13 +420,9 @@ mod tests {
     let root_fixture = fixtures::store_path("root-package");
     let root = db.resolve_fixture_path(&root_fixture);
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
-    assert!(conn.connected());
+    let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &root).unwrap();
     assert_eq!(size, Size::from_bytes(200)); // 100 + 50 + 50
-    conn.close().unwrap();
-    assert!(!conn.connected());
   }
 
   #[test]
@@ -438,14 +434,12 @@ mod tests {
       db.resolve_fixture_path(&fixtures::store_path("unregistered-1.0"));
     fs::create_dir_all(&unregistered).unwrap();
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let error =
       crate::snapshot::query_store_snapshot_with_backend(&conn, &unregistered)
         .unwrap_err()
         .to_string();
     assert!(error.contains("is not a valid store path"));
-    conn.close().unwrap();
   }
 
   #[test]
@@ -455,15 +449,13 @@ mod tests {
     let root_fixture = fixtures::store_path("root-package");
     let root = db.resolve_fixture_path(&root_fixture);
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let info = conn.query_closure_path_info(&root).unwrap();
     assert_eq!(info.len(), 3);
     assert_eq!(
       info.iter().map(|path| path.nar_size().bytes()).sum::<i64>(),
       200,
     );
-    conn.close().unwrap();
   }
 
   #[test]
@@ -473,11 +465,9 @@ mod tests {
     let a_fixture = fixtures::store_path("package-a");
     let a = db.resolve_fixture_path(&a_fixture);
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let closure = conn.query_closure_path_info(&a).unwrap();
     assert_eq!(closure.len(), 4);
-    conn.close().unwrap();
   }
 
   #[test]
@@ -487,11 +477,9 @@ mod tests {
     let system_fixture = fixtures::system_path("nixos-25.11");
     let system = db.resolve_fixture_path(&system_fixture);
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let derivations = conn.query_system_derivations(&system).unwrap();
     assert!(!derivations.is_empty());
-    conn.close().unwrap();
   }
 
   #[test]
@@ -501,11 +489,9 @@ mod tests {
     let path_fixture = fixtures::store_path("self-referential");
     let path = db.resolve_fixture_path(&path_fixture);
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &path).unwrap();
     assert_eq!(size, Size::from_bytes(500));
-    conn.close().unwrap();
   }
 
   #[test]
@@ -513,8 +499,7 @@ mod tests {
     let db = edge_cases::create_circular_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     for letter in ["a", "b", "c"] {
       let path = db.resolve_fixture_path(&fixtures::store_path(&format!(
         "circular-{letter}"
@@ -526,7 +511,6 @@ mod tests {
         "Wrong size for circular-{letter}"
       );
     }
-    conn.close().unwrap();
   }
 
   #[test]
@@ -535,14 +519,12 @@ mod tests {
     let db_path = db.db_path().to_string_lossy().to_string();
     let path = db.resolve_fixture_path(&fixtures::store_path("wide-root"));
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &path).unwrap();
     assert_eq!(size, Size::from_bytes(6000)); // 1000 + 100*50
 
     let closure = conn.query_closure_path_info(&path).unwrap();
     assert_eq!(closure.len(), 101); // root + 100 children
-    conn.close().unwrap();
   }
 
   #[test]
@@ -551,13 +533,11 @@ mod tests {
     let db_path = db.db_path().to_string_lossy().to_string();
     let path = db.resolve_fixture_path(&fixtures::store_path("deep-0"));
 
-    let mut conn = DbConnection::new(&db_path);
-    conn.connect().unwrap();
+    let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &path).unwrap();
     assert_eq!(size, Size::from_bytes(10000)); // 100 * 100
 
     let closure = conn.query_closure_path_info(&path).unwrap();
     assert_eq!(closure.len(), 100);
-    conn.close().unwrap();
   }
 }

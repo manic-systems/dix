@@ -431,7 +431,7 @@ struct ParsedStorePath {
 ///
 /// # Errors
 ///
-/// Returns an error if store connection or package querying fails.
+/// Returns an error if package querying fails.
 pub fn query_diff_report(
   path_old: &Path,
   path_new: &Path,
@@ -442,12 +442,9 @@ pub fn query_diff_report(
     "starting diff report computation"
   );
 
-  let (old, new) = CombinedStoreBackend::query_default(|backend| {
-    Ok((
-      query_store_snapshot_with_backend(backend, path_old)?,
-      query_store_snapshot_with_backend(backend, path_new)?,
-    ))
-  })?;
+  let backend = CombinedStoreBackend::open();
+  let old = query_store_snapshot_with_backend(&backend, path_old)?;
+  let new = query_store_snapshot_with_backend(&backend, path_new)?;
   let report = diff_store_snapshots(&old, &new);
   let path_stats = report.path_stats();
 
@@ -465,7 +462,7 @@ pub fn query_diff_report(
   Ok(report)
 }
 
-/// Queries consecutive paths on one store connection and diffs adjacent
+/// Queries consecutive paths on one store backend and diffs adjacent
 /// snapshots. Each path is queried once, even when it participates in two
 /// comparisons.
 ///
@@ -476,16 +473,15 @@ pub fn query_diff_report(
 ///
 /// # Errors
 ///
-/// Returns an error if connecting to the store or querying a path fails.
+/// Returns an error if querying a path fails.
 pub fn query_adjacent_diff_reports(paths: &[&Path]) -> Result<Vec<DiffReport>> {
   if paths.len() < 2 {
     return Ok(Vec::new());
   }
 
-  CombinedStoreBackend::query_default(|backend| {
-    adjacent_diff_reports(paths, |path| {
-      query_store_snapshot_with_backend(backend, path)
-    })
+  let backend = CombinedStoreBackend::open();
+  adjacent_diff_reports(paths, |path| {
+    query_store_snapshot_with_backend(&backend, path)
   })
 }
 
