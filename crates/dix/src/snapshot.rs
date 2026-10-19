@@ -33,17 +33,12 @@ pub struct StoreSnapshot {
 ///
 /// # Errors
 ///
-/// Returns an error if the store connection or path queries fail.
+/// Returns an error if the path queries fail.
 pub fn query_store_snapshot(path: &Path) -> Result<StoreSnapshot> {
-  CombinedStoreBackend::query_default(|backend| {
-    query_store_snapshot_with_backend(backend, path)
-  })
+  query_store_snapshot_with_backend(&CombinedStoreBackend::open(), path)
 }
 
 /// Queries Nix store data for one path using a caller-provided backend.
-///
-/// This does not call [`StoreBackend::connect`] or [`StoreBackend::close`].
-/// Callers using connection-backed implementations must manage that lifecycle.
 ///
 /// # Returns
 ///
