@@ -14,8 +14,8 @@ use crate::{
   StorePath,
   VersionDiff,
   diff::{
-    Diff as EngineDiff,
     Package,
+    VersionChange,
     diff_packages,
   },
   snapshot::{
@@ -90,20 +90,22 @@ impl PackageDiff {
     }
   }
 
-  fn from_engine(
-    diff: EngineDiff,
+  fn from_change(
+    change: VersionChange,
     old: &SnapshotPackages,
     new: &SnapshotPackages,
   ) -> Self {
     Self {
       selection:            DerivationSelectionStatus::between(
-        &diff.name, old, new,
+        &change.name,
+        old,
+        new,
       ),
-      size:                 PackageSizeDelta::between(&diff.name, old, new),
-      name:                 diff.name,
-      versions:             diff.versions,
-      status:               diff.status,
-      has_omitted_versions: diff.has_omitted_versions,
+      size:                 PackageSizeDelta::between(&change.name, old, new),
+      name:                 change.name,
+      versions:             change.versions,
+      status:               change.status,
+      has_omitted_versions: change.has_omitted_versions,
     }
   }
 }
@@ -173,7 +175,12 @@ fn package_diffs_with_sizes(
 ) -> Vec<PackageDiff> {
   let mut diffs = diff_packages(&old.packages, &new.packages)
     .into_iter()
-    .map(|diff| (diff.name.clone(), PackageDiff::from_engine(diff, old, new)))
+    .map(|change| {
+      (
+        change.name.clone(),
+        PackageDiff::from_change(change, old, new),
+      )
+    })
     .collect::<BTreeMap<_, _>>();
 
   for name in old.sizes.keys().chain(new.sizes.keys()) {

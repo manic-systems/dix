@@ -9,10 +9,10 @@ mod version;
 
 pub use engine::diff_packages;
 pub use model::{
-  Diff,
   DiffStatus,
   Package,
   VersionAmount,
+  VersionChange,
   VersionDiff,
 };
 pub use version::{
