@@ -79,9 +79,9 @@ impl From<PathStats> for JsonPathStats {
 struct JsonDiff<'a> {
   name:                 &'a str,
   versions:             Vec<JsonVersionDiff<'a>>,
-  status:               JsonDiffStatus,
-  kind:                 JsonChangeKind,
-  selection:            JsonDerivationSelectionStatus,
+  status:               DiffStatus,
+  kind:                 ChangeKind,
+  selection:            DerivationSelectionStatus,
   has_omitted_versions: bool,
   size_old:             i64,
   size_new:             i64,
@@ -98,9 +98,9 @@ impl<'a> From<&'a PackageDiff> for JsonDiff<'a> {
         .iter()
         .map(JsonVersionDiff::from)
         .collect(),
-      status:               JsonDiffStatus::from(diff.status),
-      kind:                 JsonChangeKind::from(diff.kind()),
-      selection:            JsonDerivationSelectionStatus::from(diff.selection),
+      status:               diff.status,
+      kind:                 diff.kind(),
+      selection:            diff.selection,
       has_omitted_versions: diff.has_omitted_versions,
       size_old:             diff.size.old.bytes(),
       size_new:             diff.size.new.bytes(),
@@ -187,66 +187,6 @@ impl<'a> From<&'a VersionDiff> for JsonVersionDiff<'a> {
           new_amount: new_amount.get(),
         }
       },
-    }
-  }
-}
-
-#[derive(Serialize)]
-enum JsonDiffStatus {
-  Changed,
-  Mixed,
-  Upgraded,
-  Downgraded,
-  Added,
-  Removed,
-}
-
-impl From<DiffStatus> for JsonDiffStatus {
-  fn from(status: DiffStatus) -> Self {
-    match status {
-      DiffStatus::Changed => Self::Changed,
-      DiffStatus::Mixed => Self::Mixed,
-      DiffStatus::Upgraded => Self::Upgraded,
-      DiffStatus::Downgraded => Self::Downgraded,
-      DiffStatus::Added => Self::Added,
-      DiffStatus::Removed => Self::Removed,
-    }
-  }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum JsonChangeKind {
-  Version,
-  Amount,
-  Size,
-}
-
-impl From<ChangeKind> for JsonChangeKind {
-  fn from(kind: ChangeKind) -> Self {
-    match kind {
-      ChangeKind::Version => Self::Version,
-      ChangeKind::Amount => Self::Amount,
-      ChangeKind::Size => Self::Size,
-    }
-  }
-}
-
-#[derive(Serialize)]
-enum JsonDerivationSelectionStatus {
-  Selected,
-  NewlySelected,
-  Unselected,
-  NewlyUnselected,
-}
-
-impl From<DerivationSelectionStatus> for JsonDerivationSelectionStatus {
-  fn from(status: DerivationSelectionStatus) -> Self {
-    match status {
-      DerivationSelectionStatus::Selected => Self::Selected,
-      DerivationSelectionStatus::NewlySelected => Self::NewlySelected,
-      DerivationSelectionStatus::Unselected => Self::Unselected,
-      DerivationSelectionStatus::NewlyUnselected => Self::NewlyUnselected,
     }
   }
 }

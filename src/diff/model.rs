@@ -57,7 +57,9 @@ pub enum VersionDiff {
   },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+  Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
+)]
 pub enum DiffStatus {
   Changed,
   Mixed,

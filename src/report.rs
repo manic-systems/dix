@@ -57,7 +57,10 @@ pub struct PackageDiff {
 }
 
 /// The most significant kind of change a package went through.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+  Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
   /// A version was added, removed or changed.
   Version,
@@ -142,7 +145,9 @@ impl PackageSizeDelta {
 
 /// Documents if the derivation is a system package and if it was added or
 /// removed as such.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(
+  Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, serde::Serialize,
+)]
 pub enum DerivationSelectionStatus {
   /// The derivation is a system package, status unchanged.
   Selected,
