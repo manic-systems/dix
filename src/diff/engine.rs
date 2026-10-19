@@ -19,23 +19,14 @@ use crate::diff::{
   version::VersionChangeOrdering,
 };
 
+/// Diffs the packages of two closures.
+///
+/// # Returns
+///
+/// One diff per package name whose versions changed, ordered by name.
 #[must_use]
 pub fn diff_packages(old: &[Package], new: &[Package]) -> Vec<Diff> {
-  let mut diffs = build_package_diffs(old, new);
-  canonicalize_diffs(&mut diffs);
-  diffs
-}
-
-fn build_package_diffs<'a>(
-  packages_old: impl IntoIterator<Item = &'a Package>,
-  packages_new: impl IntoIterator<Item = &'a Package>,
-) -> Vec<Diff> {
-  let versions_by_name = collect_package_versions(packages_old, packages_new);
-  generate_diffs_from_version_map(versions_by_name)
-}
-
-fn canonicalize_diffs(diffs: &mut [Diff]) {
-  diffs.sort_by(|left, right| left.name.cmp(&right.name));
+  generate_diffs_from_version_map(collect_package_versions(old, new))
 }
 
 fn collect_package_versions<'a>(
@@ -318,7 +309,6 @@ mod tests {
   fn diff_for(name: &str, old: &[&str], new: &[&str]) -> Diff {
     let mut diffs =
       generate_diffs_from_version_map(version_map(name, old, new));
-    canonicalize_diffs(&mut diffs);
     assert_eq!(diffs.len(), 1);
     diffs.remove(0)
   }
