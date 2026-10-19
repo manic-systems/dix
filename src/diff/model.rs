@@ -1,6 +1,22 @@
 use std::num::NonZeroUsize;
 
-use crate::Version;
+use crate::diff::Version;
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Package {
+  pub name:    String,
+  pub version: Version,
+}
+
+impl Package {
+  #[must_use]
+  pub fn new(name: impl Into<String>, version: impl Into<Version>) -> Self {
+    Self {
+      name:    name.into(),
+      version: version.into(),
+    }
+  }
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Diff {
@@ -23,11 +39,6 @@ impl VersionAmount {
       version: version.into(),
       amount,
     }
-  }
-
-  #[must_use]
-  pub fn try_new(version: impl Into<Version>, amount: usize) -> Option<Self> {
-    Some(Self::new(version, NonZeroUsize::new(amount)?))
   }
 }
 

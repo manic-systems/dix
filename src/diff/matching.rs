@@ -5,12 +5,9 @@ use std::{
 
 use itertools::EitherOrBoth;
 
-use crate::{
+use crate::diff::{
   VersionAmount,
-  version::{
-    VersionComponent,
-    VersionPiece,
-  },
+  version::VersionComponent,
 };
 
 /// Computes the Levenshtein distance between two slices.
@@ -130,6 +127,15 @@ fn minimum_cost_ordered_matching(
   matching
 }
 
+fn version_components(
+  items: &[VersionAmount],
+) -> Vec<Vec<VersionComponent<'_>>> {
+  items
+    .iter()
+    .map(|item| item.version.components().collect())
+    .collect()
+}
+
 /// Takes two ordered lists of versions and matches them while preserving their
 /// order. The matching:
 ///
@@ -161,27 +167,8 @@ pub fn match_version_amounts<'a>(
   }
 
   // Pre-extract version components to avoid repetitive extraction
-  let from_components: Vec<Vec<VersionComponent>> = from
-    .iter()
-    .map(|item| {
-      item
-        .version
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect()
-    })
-    .collect();
-
-  let to_components: Vec<Vec<VersionComponent>> = to
-    .iter()
-    .map(|item| {
-      item
-        .version
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect()
-    })
-    .collect();
+  let from_components = version_components(from);
+  let to_components = version_components(to);
 
   let matchings = minimum_cost_ordered_matching(
     from_components.len(),
@@ -229,7 +216,7 @@ mod tests {
   use proptest::proptest;
 
   use super::*;
-  use crate::{
+  use crate::diff::{
     Version,
     version::VersionComponent,
   };
@@ -280,16 +267,10 @@ mod tests {
     #[test]
     fn no_crash_edit_dist(from in r"(\PC-)*(\PC)?", to in r"(\PC-)*(\PC)?") {
       let from = Version::from(from);
-      let from: Vec<VersionComponent> = from
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect();
+      let from: Vec<VersionComponent> = from.components().collect();
 
       let to = Version::from(to);
-      let to: Vec<VersionComponent> = to
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect();
+      let to: Vec<VersionComponent> = to.components().collect();
 
       levenshtein(&from, &to);
     }
@@ -297,16 +278,10 @@ mod tests {
     #[test]
     fn symmetry_edit_dist(from in r"(\PC-)*(\PC)?", to in r"(\PC-)*(\PC)?") {
       let from = Version::from(from);
-      let from: Vec<VersionComponent> = from
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect();
+      let from: Vec<VersionComponent> = from.components().collect();
 
       let to = Version::from(to);
-      let to: Vec<VersionComponent> = to
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect();
+      let to: Vec<VersionComponent> = to.components().collect();
 
       let forward = levenshtein(&from, &to);
       let backward = levenshtein(&to, &from);
@@ -317,14 +292,10 @@ mod tests {
   #[test]
   fn basic_component_edit_dist() {
     let from = Version::from("foo-123.0-man-pages".to_owned());
-    let from: Vec<VersionComponent> = from
-      .into_iter()
-      .filter_map(VersionPiece::component)
-      .collect();
+    let from: Vec<VersionComponent> = from.components().collect();
 
     let to = Version::from("foo-123.4.12-man-pages".to_owned());
-    let to: Vec<VersionComponent> =
-      to.into_iter().filter_map(VersionPiece::component).collect();
+    let to: Vec<VersionComponent> = to.components().collect();
 
     assert_eq!(levenshtein(&from, &to), 2);
   }

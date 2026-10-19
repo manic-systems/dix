@@ -13,7 +13,8 @@ use std::{
   time::Duration,
 };
 
-use dix_diff::VersionPiece;
+// The `diff` crate, not `crate::diff`.
+use ::diff as char_diff;
 use itertools::{
   EitherOrBoth,
   Itertools,
@@ -36,6 +37,7 @@ use crate::{
   Version,
   VersionAmount,
   VersionDiff,
+  diff::VersionPiece,
 };
 
 /// Controls which package diffs a human-readable report shows.
@@ -419,7 +421,7 @@ fn write_version(
   version: &Version,
   style: impl Copy + Fn(Painted<&str>) -> Painted<&str>,
 ) -> fmt::Result {
-  for piece in version {
+  for piece in version.pieces() {
     write_version_piece(buf, &piece, style)?;
   }
 
@@ -474,8 +476,8 @@ fn fmt_single_version_diff(
   old_ver: &Version,
   new_ver: &Version,
 ) -> fmt::Result {
-  let old_parts: Vec<_> = old_ver.into_iter().collect();
-  let new_parts: Vec<_> = new_ver.into_iter().collect();
+  let old_parts: Vec<_> = old_ver.pieces().collect();
+  let new_parts: Vec<_> = new_ver.pieces().collect();
 
   if (old_parts.is_empty() && new_parts.is_empty()) || (old_ver == new_ver) {
     return Ok(());
@@ -571,12 +573,12 @@ fn fmt_version_piece_pair(
         return Ok(());
       }
 
-      let char_diffs = diff::chars(*old_c, *new_c);
+      let char_diffs = char_diff::chars(*old_c, *new_c);
       let mut diff_active = false;
 
       for res in char_diffs {
         match res {
-          diff::Result::Both(left, right) => {
+          char_diff::Result::Both(left, right) => {
             if diff_active {
               write!(old_acc, "{}", left.red())?;
               write!(new_acc, "{}", right.green())?;
@@ -585,11 +587,11 @@ fn fmt_version_piece_pair(
               write!(new_acc, "{}", right.yellow())?;
             }
           },
-          diff::Result::Left(left) => {
+          char_diff::Result::Left(left) => {
             diff_active = true;
             write!(old_acc, "{}", left.red())?;
           },
-          diff::Result::Right(right) => {
+          char_diff::Result::Right(right) => {
             diff_active = true;
             write!(new_acc, "{}", right.green())?;
           },

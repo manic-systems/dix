@@ -12,9 +12,10 @@ use misstep::{
   report,
 };
 
+mod diff;
 pub mod json;
 
-pub use dix_diff::{
+pub use diff::{
   DiffStatus,
   Version,
   VersionAmount,

@@ -121,7 +121,6 @@ name = "dix"
 version = "3.0.0"
 dependencies = [
  "diff",
- "dix-diff",
  "itertools",
  "misstep",
  "pound",
@@ -135,14 +134,6 @@ dependencies = [
  "tracing-subscriber",
  "unicode-width",
  "yansi",
-]
-
-[[package]]
-name = "dix-diff"
-version = "2.1.0"
-dependencies = [
- "itertools",
- "proptest",
 ]
 
 [[package]]

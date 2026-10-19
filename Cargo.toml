@@ -1,40 +1,38 @@
-[workspace]
-members  = [ "crates/dix", "crates/dix-diff" ]
-resolver = "3"
-
-[workspace.package]
-categories   = [ "command-line-utilities" ]
-edition      = "2024"
-homepage     = "https://github.com/faukah/dix"
-keywords     = [ "nix", "nixos" ]
-license      = "GPL-3.0-only"
-repository   = "https://github.com/faukah/dix"
-rust-version = "1.97.0"
+[package]
+name         = "dix"
 version      = "3.0.0"
+edition      = "2024"
+rust-version = "1.97.0"
+description  = "Diff Nix"
+readme       = "README.md"
+homepage     = "https://github.com/faukah/dix"
+repository   = "https://github.com/faukah/dix"
+license      = "GPL-3.0-only"
+keywords     = [ "nix", "nixos" ]
+categories   = [ "command-line-utilities" ]
+include      = [ "CHANGELOG.md", "Cargo.lock", "Cargo.toml", "LICENSE.md", "README.md", "src/**" ]
 
-[workspace.dependencies]
-# Keep this exact: packaged `dix` resolves `dix-diff` from crates.io after Cargo
-# strips the local path, so release `dix-diff` before `dix`.
-dix-diff = { path = "crates/dix-diff", version = "2.1.0" }
-
+[dependencies]
 diff               = "0.1.13"
 itertools          = "0.15.0"
 misstep            = { features = [ "color", "pretty" ], version = "0.4.1" }
 pound              = "0.5.1"
-proptest           = "1.6.0"
 rusqlite           = { default-features = false, features = [ "cache" ], version = "0.40.0" }
 serde              = { features = [ "derive" ], version = "1.0.228" }
 serde_json         = "1.0.149"
 size               = "0.6.0"
-tempfile           = "3.10.0"
 tracing            = { default-features = false, features = [ "std" ], version = "0.1" }
 tracing-subscriber = { features = [ "env-filter" ], version = "0.3" }
 unicode-width      = "0.2.0"
 yansi              = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
 
+[dev-dependencies]
+proptest = "1.6.0"
+tempfile = "3.10.0"
+
 # See:
 #  <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>
-[workspace.lints.clippy]
+[lints.clippy]
 # The lint groups above enable some less-than-desirable rules, we should manually
 # enable those to keep our sanity.
 absolute_paths                       = "allow"

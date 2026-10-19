@@ -75,17 +75,6 @@ to diff deployments to remote hosts, which requires dix on the target host.
 - `closure` lists every path in the closure with its NAR size in bytes.
 - `selected` lists the packages selected by a NixOS system's `system-path`.
 
-## Releasing
-
-`dix-diff` is a separate crate because it owns the pure package/version diff
-engine. Publish it before publishing `dix`; the `dix` package depends on the
-same exact `dix-diff` version.
-
-```sh
-cargo publish -p dix-diff
-cargo publish -p dix
-```
-
 ## Contributing
 
 If you have any problems, feature requests or want to contribute code or want to
