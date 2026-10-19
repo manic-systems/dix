@@ -19,6 +19,7 @@ pub use diff::{
   DiffStatus,
   Version,
   VersionAmount,
+  VersionChange,
   VersionDiff,
 };
 mod render;

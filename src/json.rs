@@ -94,14 +94,18 @@ impl<'a> From<&'a PackageDiff> for JsonDiff<'a> {
     Self {
       name:                 diff.name.as_str(),
       versions:             diff
-        .versions
+        .change
         .iter()
+        .flat_map(|change| &change.versions)
         .map(JsonVersionDiff::from)
         .collect(),
-      status:               diff.status,
+      status:               diff.status(),
       kind:                 diff.kind(),
       selection:            diff.selection,
-      has_omitted_versions: diff.has_omitted_versions,
+      has_omitted_versions: diff
+        .change
+        .as_ref()
+        .is_some_and(|change| change.has_omitted_versions),
       size_old:             diff.size.old.bytes(),
       size_new:             diff.size.new.bytes(),
       size_delta:           size_delta.bytes(),
@@ -203,6 +207,7 @@ mod tests {
     DiffReport,
     PackageDiff,
     PackageSizeDelta,
+    diff::VersionChange,
   };
 
   fn amount(amount: usize) -> NonZeroUsize {
@@ -216,22 +221,24 @@ mod tests {
 
     let report = DiffReport {
       diffs:      vec![PackageDiff {
-        name:                 "nixos".to_owned(),
-        versions:             vec![
-          VersionDiff::Changed {
-            old: VersionAmount::new("25.11-system-path", amount(1)),
-            new: VersionAmount::new("25.12-system-path", amount(1)),
-          },
-          VersionDiff::AmountChanged {
-            version:    Version::new("25.12-system"),
-            old_amount: amount(1),
-            new_amount: amount(2),
-          },
-        ],
-        status:               DiffStatus::Changed,
-        selection:            DerivationSelectionStatus::Unselected,
-        has_omitted_versions: false,
-        size:                 PackageSizeDelta {
+        name:      "nixos".to_owned(),
+        change:    Some(VersionChange {
+          versions:             vec![
+            VersionDiff::Changed {
+              old: VersionAmount::new("25.11-system-path", amount(1)),
+              new: VersionAmount::new("25.12-system-path", amount(1)),
+            },
+            VersionDiff::AmountChanged {
+              version:    Version::new("25.12-system"),
+              old_amount: amount(1),
+              new_amount: amount(2),
+            },
+          ],
+          status:               DiffStatus::Changed,
+          has_omitted_versions: false,
+        }),
+        selection: DerivationSelectionStatus::Unselected,
+        size:      PackageSizeDelta {
           old: Size::from_bytes(1_000),
           new: Size::from_bytes(2_500),
         },

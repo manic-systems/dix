@@ -146,10 +146,10 @@ fn render_package_diffs(
 ) -> Result<usize, fmt::Error> {
   let mut diffs = diffs.iter().collect::<Vec<_>>();
   diffs.sort_by(|a, b| {
-    status_group(a.status)
-      .cmp(&status_group(b.status))
+    status_group(a.status())
+      .cmp(&status_group(b.status()))
       .then_with(|| a.name.cmp(&b.name))
-      .then_with(|| a.status.cmp(&b.status))
+      .then_with(|| a.status().cmp(&b.status()))
   });
 
   render_diffs(writer, &diffs, options)
@@ -171,7 +171,7 @@ fn render_diffs(
   let mut hidden = 0;
 
   for (group, group_diffs) in
-    &diffs.iter().chunk_by(|diff| status_group(diff.status))
+    &diffs.iter().chunk_by(|diff| status_group(diff.status()))
   {
     let (shown, group_hidden): (Vec<&&PackageDiff>, Vec<_>) =
       group_diffs.partition(|diff| options.shows(diff));
@@ -209,7 +209,7 @@ fn render_diff(
   diff: &PackageDiff,
   name_width: usize,
 ) -> fmt::Result {
-  let status_char = status_char(diff.status);
+  let status_char = status_char(diff.status());
   let selection_char = selection_char(diff.selection);
   let name_painted = match diff.selection {
     DerivationSelectionStatus::Selected
@@ -223,17 +223,19 @@ fn render_diff(
     "[{status_char}{selection_char}] {name_painted:<name_width$}"
   )?;
 
+  let size_delta = fmt_package_size_delta(diff.size);
+  let Some(change) = &diff.change else {
+    return writeln!(writer, "{size_delta}");
+  };
+
   let (old_str, new_str) =
-    fmt_version_diffs(&diff.versions, diff.has_omitted_versions)?;
+    fmt_version_diffs(&change.versions, change.has_omitted_versions)?;
   let arrow = if !old_str.is_empty() && !new_str.is_empty() {
     " -> "
   } else {
     ""
   };
-  let size_delta = fmt_package_size_delta(diff.size);
-  if old_str.is_empty() && new_str.is_empty() {
-    writeln!(writer, "{size_delta}")
-  } else if size_delta.is_empty() {
+  if size_delta.is_empty() {
     writeln!(writer, "{old_str}{arrow}{new_str}")
   } else {
     writeln!(writer, "{old_str}{arrow}{new_str}, {size_delta}")
@@ -612,6 +614,7 @@ mod tests {
   use std::num::NonZeroUsize;
 
   use super::*;
+  use crate::diff::VersionChange;
 
   fn amount(amount: usize) -> NonZeroUsize {
     NonZeroUsize::new(amount)
@@ -620,15 +623,17 @@ mod tests {
 
   fn package_diff(name: &str, status: DiffStatus) -> PackageDiff {
     PackageDiff {
-      name: name.to_owned(),
-      versions: vec![VersionDiff::Changed {
-        old: VersionAmount::new("1.0.0", amount(1)),
-        new: VersionAmount::new("2.0.0", amount(1)),
-      }],
-      status,
+      name:      name.to_owned(),
+      change:    Some(VersionChange {
+        versions: vec![VersionDiff::Changed {
+          old: VersionAmount::new("1.0.0", amount(1)),
+          new: VersionAmount::new("2.0.0", amount(1)),
+        }],
+        status,
+        has_omitted_versions: false,
+      }),
       selection: DerivationSelectionStatus::Unselected,
-      has_omitted_versions: false,
-      size: PackageSizeDelta {
+      size:      PackageSizeDelta {
         old: Size::from_bytes(0),
         new: Size::from_bytes(0),
       },
@@ -665,26 +670,26 @@ mod tests {
 
     let diffs = [
       PackageDiff {
-        name:                 "linux-firmware".to_owned(),
-        versions:             vec![VersionDiff::Changed {
-          old: VersionAmount::new("20260221", amount(1)),
-          new: VersionAmount::new("20260309", amount(1)),
-        }],
-        status:               DiffStatus::Upgraded,
-        selection:            DerivationSelectionStatus::Unselected,
-        has_omitted_versions: false,
-        size:                 PackageSizeDelta {
+        name:      "linux-firmware".to_owned(),
+        change:    Some(VersionChange {
+          versions:             vec![VersionDiff::Changed {
+            old: VersionAmount::new("20260221", amount(1)),
+            new: VersionAmount::new("20260309", amount(1)),
+          }],
+          status:               DiffStatus::Upgraded,
+          has_omitted_versions: false,
+        }),
+        selection: DerivationSelectionStatus::Unselected,
+        size:      PackageSizeDelta {
           old: Size::from_bytes(100),
           new: Size::from_bytes(10_000),
         },
       },
       PackageDiff {
-        name:                 "source".to_owned(),
-        versions:             Vec::new(),
-        status:               DiffStatus::Changed,
-        selection:            DerivationSelectionStatus::Unselected,
-        has_omitted_versions: false,
-        size:                 PackageSizeDelta {
+        name:      "source".to_owned(),
+        change:    None,
+        selection: DerivationSelectionStatus::Unselected,
+        size:      PackageSizeDelta {
           old: Size::from_bytes(10_000),
           new: Size::from_bytes(100),
         },

@@ -23,9 +23,12 @@ use crate::diff::{
 ///
 /// # Returns
 ///
-/// One change per package whose versions changed, ordered by name.
+/// The change of every package whose versions changed, keyed by name.
 #[must_use]
-pub fn diff_packages(old: &[Package], new: &[Package]) -> Vec<VersionChange> {
+pub fn diff_packages(
+  old: &[Package],
+  new: &[Package],
+) -> BTreeMap<String, VersionChange> {
   version_changes(collect_package_versions(old, new))
 }
 
@@ -126,10 +129,10 @@ fn increment_amount(amount: NonZeroUsize) -> NonZeroUsize {
 
 fn version_changes(
   packages: BTreeMap<String, PackageVersions>,
-) -> Vec<VersionChange> {
+) -> BTreeMap<String, VersionChange> {
   packages
     .into_iter()
-    .filter_map(|(name, versions)| version_change(name, &versions))
+    .filter_map(|(name, versions)| Some((name, version_change(&versions)?)))
     .collect()
 }
 
@@ -138,10 +141,7 @@ fn version_changes(
 /// # Returns
 ///
 /// The change, or `None` if every version kept its amount.
-fn version_change(
-  name: String,
-  versions: &PackageVersions,
-) -> Option<VersionChange> {
+fn version_change(versions: &PackageVersions) -> Option<VersionChange> {
   let mut old_only = Vec::new();
   let mut new_only = Vec::new();
   let mut amount_diffs = Vec::new();
@@ -184,7 +184,6 @@ fn version_change(
   };
 
   Some(VersionChange {
-    name,
     versions: diffs,
     status,
     has_omitted_versions,
@@ -251,10 +250,7 @@ fn change_status(version_diffs: &[VersionDiff]) -> DiffStatus {
 #[cfg(test)]
 mod tests {
   use std::{
-    collections::{
-      BTreeMap,
-      HashSet,
-    },
+    collections::BTreeMap,
     num::NonZeroUsize,
   };
 
@@ -291,9 +287,11 @@ mod tests {
   }
 
   fn change_for(name: &str, old: &[&str], new: &[&str]) -> VersionChange {
-    let mut diffs = version_changes(version_map(name, old, new));
-    assert_eq!(diffs.len(), 1);
-    diffs.remove(0)
+    let mut changes = version_changes(version_map(name, old, new));
+    assert_eq!(changes.len(), 1);
+    changes
+      .remove(name)
+      .unwrap_or_else(|| panic!("expected a change for {name}"))
   }
 
   fn old_side_count(diff: &VersionChange) -> usize {
@@ -354,7 +352,6 @@ mod tests {
   fn generate_diffs_added_package() {
     let diff = change_for("new-pkg", &[], &["1.0.0"]);
 
-    assert_eq!(diff.name, "new-pkg");
     assert_eq!(diff.status, DiffStatus::Added);
     assert_eq!(diff.versions, vec![VersionDiff::Added(version_amount(
       "1.0.0", 1
@@ -365,7 +362,6 @@ mod tests {
   fn generate_diffs_removed_package() {
     let diff = change_for("old-pkg", &["1.0.0"], &[]);
 
-    assert_eq!(diff.name, "old-pkg");
     assert_eq!(diff.status, DiffStatus::Removed);
     assert_eq!(diff.versions, vec![VersionDiff::Removed(version_amount(
       "1.0.0", 1
@@ -471,13 +467,7 @@ mod tests {
       .insert("pkg-c".to_owned(), package_versions(&["1.0.0"], &["1.0.0"]));
 
     let result = version_changes(packages);
-    let names: HashSet<_> =
-      result.iter().map(|diff| diff.name.as_str()).collect();
-
-    assert_eq!(result.len(), 2);
-    assert!(names.contains("pkg-a"));
-    assert!(names.contains("pkg-b"));
-    assert!(!names.contains("pkg-c"));
+    assert_eq!(result.keys().collect::<Vec<_>>(), ["pkg-a", "pkg-b"]);
   }
 
   #[test]
@@ -509,8 +499,9 @@ mod tests {
     let result = version_changes(packages);
 
     assert_eq!(result.len(), 1);
-    assert!(result[0].has_omitted_versions);
-    assert_eq!(old_side_count(&result[0]), 50);
-    assert_eq!(new_side_count(&result[0]), 50);
+    let change = &result["large-pkg"];
+    assert!(change.has_omitted_versions);
+    assert_eq!(old_side_count(change), 50);
+    assert_eq!(new_side_count(change), 50);
   }
 }
