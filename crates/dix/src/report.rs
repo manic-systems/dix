@@ -18,7 +18,6 @@ use size::Size;
 use crate::{
   DiffStatus,
   StorePath,
-  Version,
   VersionDiff,
   snapshot::{
     StoreSnapshot,
@@ -34,18 +33,18 @@ const PACKAGE_SIZE_DELTA_SIGNIFICANCE_THRESHOLD_BYTES: i64 = 8 * 1024;
 
 #[derive(Debug)]
 pub struct DiffReport {
-  diffs:      Vec<PackageDiff>,
-  path_stats: PathStats,
-  size_old:   Size,
-  size_new:   Size,
+  pub diffs:      Vec<PackageDiff>,
+  pub path_stats: PathStats,
+  pub size_old:   Size,
+  pub size_new:   Size,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathStats {
-  old:     usize,
-  new:     usize,
-  added:   usize,
-  removed: usize,
+  pub old:     usize,
+  pub new:     usize,
+  pub added:   usize,
+  pub removed: usize,
 }
 
 #[derive(Debug)]
@@ -71,8 +70,8 @@ pub enum ChangeKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PackageSizeDelta {
-  old: Size,
-  new: Size,
+  pub old: Size,
+  pub new: Size,
 }
 
 impl PackageDiff {
@@ -94,43 +93,23 @@ impl PackageDiff {
 
   fn from_engine(
     diff: EngineDiff,
-    selected_old: &HashSet<String>,
-    selected_new: &HashSet<String>,
-    old_sizes: &BTreeMap<String, Size>,
-    new_sizes: &BTreeMap<String, Size>,
+    old: &SnapshotPackages,
+    new: &SnapshotPackages,
   ) -> Self {
-    let name = diff.name;
     Self {
-      selection: DerivationSelectionStatus::from_names(
-        &name,
-        selected_old,
-        selected_new,
+      selection:            DerivationSelectionStatus::between(
+        &diff.name, old, new,
       ),
-      size: PackageSizeDelta::between(&name, old_sizes, new_sizes),
-      name,
-      versions: diff.versions,
-      status: diff.status,
+      size:                 PackageSizeDelta::between(&diff.name, old, new),
+      name:                 diff.name,
+      versions:             diff.versions,
+      status:               diff.status,
       has_omitted_versions: diff.has_omitted_versions,
     }
   }
 }
 
 impl PackageSizeDelta {
-  #[must_use]
-  pub const fn new(old: Size, new: Size) -> Self {
-    Self { old, new }
-  }
-
-  #[must_use]
-  pub const fn old_size(self) -> Size {
-    self.old
-  }
-
-  #[must_use]
-  pub const fn new_size(self) -> Size {
-    self.new
-  }
-
   #[must_use]
   pub fn delta(self) -> Size {
     self.new - self.old
@@ -143,18 +122,19 @@ impl PackageSizeDelta {
 
   fn between(
     name: &str,
-    old_sizes: &BTreeMap<String, Size>,
-    new_sizes: &BTreeMap<String, Size>,
+    old: &SnapshotPackages,
+    new: &SnapshotPackages,
   ) -> Self {
+    let size_of = |packages: &SnapshotPackages| {
+      packages
+        .sizes
+        .get(name)
+        .copied()
+        .unwrap_or_else(|| Size::from_bytes(0))
+    };
     Self {
-      old: old_sizes
-        .get(name)
-        .copied()
-        .unwrap_or_else(|| Size::from_bytes(0)),
-      new: new_sizes
-        .get(name)
-        .copied()
-        .unwrap_or_else(|| Size::from_bytes(0)),
+      old: size_of(old),
+      new: size_of(new),
     }
   }
 }
@@ -174,12 +154,12 @@ pub enum DerivationSelectionStatus {
 }
 
 impl DerivationSelectionStatus {
-  fn from_names(
+  fn between(
     name: &str,
-    old: &HashSet<String>,
-    new: &HashSet<String>,
+    old: &SnapshotPackages,
+    new: &SnapshotPackages,
   ) -> Self {
-    match (old.contains(name), new.contains(name)) {
+    match (old.selected.contains(name), new.selected.contains(name)) {
       (true, true) => Self::Selected,
       (true, false) => Self::NewlyUnselected,
       (false, true) => Self::NewlySelected,
@@ -188,71 +168,21 @@ impl DerivationSelectionStatus {
   }
 }
 
-impl DiffReport {
-  #[must_use]
-  pub fn diffs(&self) -> &[PackageDiff] {
-    &self.diffs
-  }
-
-  #[must_use]
-  pub const fn path_stats(&self) -> PathStats {
-    self.path_stats
-  }
-
-  #[must_use]
-  pub const fn size_old(&self) -> Size {
-    self.size_old
-  }
-
-  #[must_use]
-  pub const fn size_new(&self) -> Size {
-    self.size_new
-  }
-
-  #[cfg(test)]
-  pub(crate) const fn new_for_test(
-    diffs: Vec<PackageDiff>,
-    path_stats: PathStats,
-    size_old: Size,
-    size_new: Size,
-  ) -> Self {
-    Self {
-      diffs,
-      path_stats,
-      size_old,
-      size_new,
-    }
-  }
-}
-
 fn package_diffs_with_sizes(
-  old: &SnapshotParts,
-  new: &SnapshotParts,
+  old: &SnapshotPackages,
+  new: &SnapshotPackages,
 ) -> Vec<PackageDiff> {
   let mut diffs = diff_snapshots(&old.snapshot, &new.snapshot)
     .into_iter()
-    .map(|diff| {
-      let name = diff.name.clone();
-      (
-        name,
-        PackageDiff::from_engine(
-          diff,
-          &old.selected,
-          &new.selected,
-          &old.package_sizes,
-          &new.package_sizes,
-        ),
-      )
-    })
+    .map(|diff| (diff.name.clone(), PackageDiff::from_engine(diff, old, new)))
     .collect::<BTreeMap<_, _>>();
 
-  for name in old.package_sizes.keys().chain(new.package_sizes.keys()) {
+  for name in old.sizes.keys().chain(new.sizes.keys()) {
     if diffs.contains_key(name) {
       continue;
     }
 
-    let size =
-      PackageSizeDelta::between(name, &old.package_sizes, &new.package_sizes);
+    let size = PackageSizeDelta::between(name, old, new);
     if !size.is_significant() {
       continue;
     }
@@ -261,11 +191,7 @@ fn package_diffs_with_sizes(
       name: name.clone(),
       versions: Vec::new(),
       status: DiffStatus::Changed,
-      selection: DerivationSelectionStatus::from_names(
-        name,
-        &old.selected,
-        &new.selected,
-      ),
+      selection: DerivationSelectionStatus::between(name, old, new),
       has_omitted_versions: false,
       size,
     });
@@ -276,56 +202,7 @@ fn package_diffs_with_sizes(
 
 impl PathStats {
   #[must_use]
-  pub const fn old_count(self) -> usize {
-    self.old
-  }
-
-  #[must_use]
-  pub const fn new_count(self) -> usize {
-    self.new
-  }
-
-  #[must_use]
-  pub const fn added_count(self) -> usize {
-    self.added
-  }
-
-  #[must_use]
-  pub const fn removed_count(self) -> usize {
-    self.removed
-  }
-
-  #[cfg(test)]
-  pub(crate) const fn new_for_test(
-    old: usize,
-    new: usize,
-    added: usize,
-    removed: usize,
-  ) -> Self {
-    Self {
-      old,
-      new,
-      added,
-      removed,
-    }
-  }
-
-  #[cfg(test)]
-  #[must_use]
-  fn between(old: &[StorePath], new: &[StorePath]) -> Self {
-    let old_paths = old.iter().collect::<HashSet<_>>();
-    let new_paths = new.iter().collect::<HashSet<_>>();
-
-    Self {
-      old:     old_paths.len(),
-      new:     new_paths.len(),
-      added:   new_paths.difference(&old_paths).count(),
-      removed: old_paths.difference(&new_paths).count(),
-    }
-  }
-
-  #[must_use]
-  fn between_path_info(old: &[StorePathInfo], new: &[StorePathInfo]) -> Self {
+  fn between(old: &[StorePathInfo], new: &[StorePathInfo]) -> Self {
     let old_paths = old.iter().map(StorePathInfo::path).collect::<HashSet<_>>();
     let new_paths = new.iter().map(StorePathInfo::path).collect::<HashSet<_>>();
 
@@ -360,71 +237,39 @@ fn add_package_size(
     .or_insert(nar_size);
 }
 
+/// The packages of one side of a diff, keyed by package name.
 struct SnapshotPackages {
-  packages:       Vec<Package>,
-  selected_names: HashSet<String>,
-  package_sizes:  BTreeMap<String, Size>,
+  snapshot: PackageSnapshot,
+  selected: HashSet<String>,
+  sizes:    BTreeMap<String, Size>,
 }
 
 impl SnapshotPackages {
-  fn from_store_snapshot(
-    snapshot: &StoreSnapshot,
-    context: SnapshotContext,
-  ) -> Self {
+  /// `side` names the snapshot in warnings about unparsable paths.
+  fn new(snapshot: &StoreSnapshot, side: &str) -> Self {
     let mut packages = Vec::new();
-    let mut package_sizes = BTreeMap::<String, Size>::new();
+    let mut sizes = BTreeMap::<String, Size>::new();
 
     for info in &snapshot.closure {
-      let Some(parsed) =
-        parse_store_path_lossy(info.path(), context.dependencies)
+      let Some((name, version)) = parse_store_path_lossy(info.path(), side)
       else {
         continue;
       };
-      add_package_size(&mut package_sizes, &parsed.name, info.nar_size());
-      packages.push(Package::new(
-        parsed.name,
-        parsed
-          .version
-          .map_or_else(|| "<none>".into(), Version::from),
-      ));
+      add_package_size(&mut sizes, name, info.nar_size());
+      packages.push(Package::new(name, version.unwrap_or("<none>")));
     }
 
     Self {
-      packages,
-      selected_names: snapshot
+      snapshot: PackageSnapshot::new(packages),
+      selected: snapshot
         .selected
         .iter()
-        .filter_map(|path| parse_store_path_lossy(path, context.selected))
-        .map(|parsed| parsed.name)
+        .filter_map(|path| parse_store_path_lossy(path, side))
+        .map(|(name, _)| name.to_owned())
         .collect(),
-      package_sizes,
+      sizes,
     }
   }
-
-  fn into_snapshot_parts(self) -> SnapshotParts {
-    SnapshotParts {
-      snapshot:      PackageSnapshot::new(self.packages),
-      selected:      self.selected_names,
-      package_sizes: self.package_sizes,
-    }
-  }
-}
-
-struct SnapshotParts {
-  snapshot:      PackageSnapshot,
-  selected:      HashSet<String>,
-  package_sizes: BTreeMap<String, Size>,
-}
-
-#[derive(Clone, Copy)]
-struct SnapshotContext {
-  dependencies: &'static str,
-  selected:     &'static str,
-}
-
-struct ParsedStorePath {
-  name:    String,
-  version: Option<String>,
 }
 
 /// Queries Nix store data and builds a pure diff report.
@@ -443,23 +288,10 @@ pub fn query_diff_report(
   );
 
   let backend = CombinedStoreBackend::open();
-  let old = query_store_snapshot_with_backend(&backend, path_old)?;
-  let new = query_store_snapshot_with_backend(&backend, path_new)?;
-  let report = diff_store_snapshots(&old, &new);
-  let path_stats = report.path_stats();
-
-  tracing::info!(
-    diff_count = report.diffs().len(),
-    paths_old = path_stats.old_count(),
-    paths_new = path_stats.new_count(),
-    paths_added = path_stats.added_count(),
-    paths_removed = path_stats.removed_count(),
-    size_old = %report.size_old(),
-    size_new = %report.size_new(),
-    "diff report complete"
-  );
-
-  Ok(report)
+  Ok(diff_store_snapshots(
+    &query_store_snapshot_with_backend(&backend, path_old)?,
+    &query_store_snapshot_with_backend(&backend, path_new)?,
+  ))
 }
 
 /// Queries consecutive paths on one store backend and diffs adjacent
@@ -520,44 +352,40 @@ pub fn diff_store_snapshots(
   old: &StoreSnapshot,
   new: &StoreSnapshot,
 ) -> DiffReport {
-  let path_stats = PathStats::between_path_info(&old.closure, &new.closure);
-  let size_old = total_nar_size(&old.closure);
-  let size_new = total_nar_size(&new.closure);
-  let old = SnapshotPackages::from_store_snapshot(old, SnapshotContext {
-    dependencies: "old dependency",
-    selected:     "old system",
-  })
-  .into_snapshot_parts();
-  let new = SnapshotPackages::from_store_snapshot(new, SnapshotContext {
-    dependencies: "new dependency",
-    selected:     "new system",
-  })
-  .into_snapshot_parts();
+  let report = DiffReport {
+    diffs:      package_diffs_with_sizes(
+      &SnapshotPackages::new(old, "old"),
+      &SnapshotPackages::new(new, "new"),
+    ),
+    path_stats: PathStats::between(&old.closure, &new.closure),
+    size_old:   total_nar_size(&old.closure),
+    size_new:   total_nar_size(&new.closure),
+  };
 
-  DiffReport {
-    diffs: package_diffs_with_sizes(&old, &new),
-    path_stats,
-    size_old,
-    size_new,
-  }
+  tracing::info!(
+    diff_count = report.diffs.len(),
+    paths_old = report.path_stats.old,
+    paths_new = report.path_stats.new,
+    paths_added = report.path_stats.added,
+    paths_removed = report.path_stats.removed,
+    size_old = %report.size_old,
+    size_new = %report.size_new,
+    "diff report complete"
+  );
+
+  report
 }
 
-fn parse_store_path_lossy(
-  path: &StorePath,
-  context: &str,
-) -> Option<ParsedStorePath> {
-  match path.parse_name_and_version() {
-    Ok((name, version)) => {
-      Some(ParsedStorePath {
-        name:    name.to_owned(),
-        version: version.map(str::to_owned),
-      })
-    },
-    Err(error) => {
-      tracing::warn!(path = %path.display(), "dropping unparsable {context} path: {error}");
-      None
-    },
-  }
+fn parse_store_path_lossy<'a>(
+  path: &'a StorePath,
+  side: &str,
+) -> Option<(&'a str, Option<&'a str>)> {
+  path
+    .parse_name_and_version()
+    .inspect_err(|error| {
+      tracing::warn!(path = %path.display(), "dropping unparsable {side} path: {error}");
+    })
+    .ok()
 }
 
 #[cfg(test)]
@@ -612,30 +440,32 @@ mod tests {
     assert_eq!(queried, paths.map(Path::to_path_buf));
     assert_eq!(reports.len(), 2);
     assert_eq!(
-      (reports[0].size_old().bytes(), reports[0].size_new().bytes()),
+      (reports[0].size_old.bytes(), reports[0].size_new.bytes()),
       (100, 200)
     );
     assert_eq!(
-      (reports[1].size_old().bytes(), reports[1].size_new().bytes()),
+      (reports[1].size_old.bytes(), reports[1].size_new.bytes()),
       (200, 300)
     );
-    assert!(reports.iter().all(|report| report.diffs().len() == 1));
+    assert!(reports.iter().all(|report| report.diffs.len() == 1));
   }
 
   #[test]
   fn path_stats_count_exact_unique_path_sets() {
-    let shared = store_path("shared-1.0");
-    let removed_a = store_path("removed-a-1.0");
-    let removed_b = store_path("removed-b-1.0");
-    let added = store_path("added-1.0");
+    let shared = store_path_info("shared-1.0", 1);
+    let removed_a = store_path_info("removed-a-1.0", 1);
+    let removed_b = store_path_info("removed-b-1.0", 1);
+    let added = store_path_info("added-1.0", 1);
 
     let old = vec![shared.clone(), shared.clone(), removed_a, removed_b];
     let new = vec![shared, added];
 
-    assert_eq!(
-      PathStats::between(&old, &new),
-      PathStats::new_for_test(3, 2, 1, 2),
-    );
+    assert_eq!(PathStats::between(&old, &new), PathStats {
+      old:     3,
+      new:     2,
+      added:   1,
+      removed: 2,
+    });
   }
 
   #[test]
@@ -668,8 +498,8 @@ mod tests {
       },
       other => panic!("expected changed version diff, got {other:?}"),
     }
-    assert_eq!(diff.size.old_size(), Size::from_bytes(100));
-    assert_eq!(diff.size.new_size(), Size::from_bytes(200));
+    assert_eq!(diff.size.old, Size::from_bytes(100));
+    assert_eq!(diff.size.new, Size::from_bytes(200));
   }
 
   #[test]
@@ -699,8 +529,8 @@ mod tests {
     assert_eq!(diff.name, "source");
     assert_eq!(diff.status, DiffStatus::Changed);
     assert!(diff.versions.is_empty());
-    assert_eq!(diff.size.old_size(), Size::from_bytes(100));
-    assert_eq!(diff.size.new_size(), Size::from_bytes(9_000));
+    assert_eq!(diff.size.old, Size::from_bytes(100));
+    assert_eq!(diff.size.new, Size::from_bytes(9_000));
   }
 
   #[test]

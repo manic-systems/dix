@@ -82,14 +82,14 @@ pub fn write_diff_report(
 ) -> Result<usize, fmt::Error> {
   writeln!(writer)?;
 
-  let hidden = render_package_diffs(writer, report.diffs(), options)?;
+  let hidden = render_package_diffs(writer, &report.diffs, options)?;
 
-  if report.diffs().len() > hidden {
+  if report.diffs.len() > hidden {
     writeln!(writer)?;
   }
 
-  write_path_stats(writer, report.path_stats())?;
-  write_size_diff(writer, report.size_old(), report.size_new())?;
+  write_path_stats(writer, report.path_stats)?;
+  write_size_diff(writer, report.size_old, report.size_new)?;
 
   Ok(hidden)
 }
@@ -277,15 +277,15 @@ fn write_path_stats(
   writer: &mut impl fmt::Write,
   stats: PathStats,
 ) -> fmt::Result {
-  let added = format!("+{}", stats.added_count());
-  let removed = format!("-{}", stats.removed_count());
+  let added = format!("+{}", stats.added);
+  let removed = format!("-{}", stats.removed);
 
   writeln!(
     writer,
     "{header}: {old} -> {new} ({added}, {removed})",
     header = "PATHS".bold(),
-    old = stats.old_count().red(),
-    new = stats.new_count().green(),
+    old = stats.old.red(),
+    new = stats.new.green(),
     added = Painted::new(added.as_str()).green(),
     removed = Painted::new(removed.as_str()).red(),
   )
@@ -626,7 +626,10 @@ mod tests {
       status,
       selection: DerivationSelectionStatus::Unselected,
       has_omitted_versions: false,
-      size: PackageSizeDelta::new(Size::from_bytes(0), Size::from_bytes(0)),
+      size: PackageSizeDelta {
+        old: Size::from_bytes(0),
+        new: Size::from_bytes(0),
+      },
     }
   }
 
@@ -668,10 +671,10 @@ mod tests {
         status:               DiffStatus::Upgraded,
         selection:            DerivationSelectionStatus::Unselected,
         has_omitted_versions: false,
-        size:                 PackageSizeDelta::new(
-          Size::from_bytes(100),
-          Size::from_bytes(10_000),
-        ),
+        size:                 PackageSizeDelta {
+          old: Size::from_bytes(100),
+          new: Size::from_bytes(10_000),
+        },
       },
       PackageDiff {
         name:                 "source".to_owned(),
@@ -679,10 +682,10 @@ mod tests {
         status:               DiffStatus::Changed,
         selection:            DerivationSelectionStatus::Unselected,
         has_omitted_versions: false,
-        size:                 PackageSizeDelta::new(
-          Size::from_bytes(10_000),
-          Size::from_bytes(100),
-        ),
+        size:                 PackageSizeDelta {
+          old: Size::from_bytes(10_000),
+          new: Size::from_bytes(100),
+        },
       },
     ];
     let mut output = String::new();
@@ -736,10 +739,12 @@ mod tests {
 
     let mut output = String::new();
 
-    write_path_stats(
-      &mut output,
-      PathStats::new_for_test(7529, 7536, 5054, 5047),
-    )
+    write_path_stats(&mut output, PathStats {
+      old:     7529,
+      new:     7536,
+      added:   5054,
+      removed: 5047,
+    })
     .unwrap();
 
     assert_eq!(output, "PATHS: 7529 -> 7536 (+5054, -5047)\n");

@@ -56,6 +56,12 @@ This is a changelog of the `dix` repository. It follows the
   returns the number of hidden package diffs instead of the number written.
 - **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
   serializes an already queried report instead of querying and printing it.
+- **Breaking:** `DiffReport`, `PathStats` and `PackageSizeDelta` expose public
+  fields instead of accessor methods, reverting the 2.0.0 change for
+  `DiffReport` and `PathStats`. Read and construct the fields directly, e.g.
+  `report.size_old` instead of `report.size_old()`, `stats.added` instead of
+  `stats.added_count()` and `PackageSizeDelta { old, new }` instead of
+  `PackageSizeDelta::new(old, new)`.
 
 ## 2.2.0
 
