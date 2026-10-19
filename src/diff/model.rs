@@ -20,7 +20,6 @@ impl Package {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct VersionChange {
-  pub name:                 String,
   pub versions:             Vec<VersionDiff>,
   pub status:               DiffStatus,
   pub has_omitted_versions: bool,

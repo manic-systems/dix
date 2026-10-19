@@ -68,6 +68,11 @@ This is a changelog of the `dix` repository. It follows the
   longer published. `DiffStatus`, `Version`, `VersionAmount` and `VersionDiff`
   are still exported from `dix`, and the rest of the diff engine is internal.
 - The repository is a single package again, so `cargo install --path .` works.
+- **Breaking:** `PackageDiff` holds the version change of a package in
+  `change: Option<VersionChange>` instead of the `versions`, `status` and
+  `has_omitted_versions` fields, and `VersionChange` is exported from `dix`.
+  `change` is `None` for packages whose size changed but whose versions did
+  not. `PackageDiff::status()` still reports those as `DiffStatus::Changed`.
 
 ## 2.2.0
 

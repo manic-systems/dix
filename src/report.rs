@@ -1,6 +1,7 @@
 use std::{
   collections::{
     BTreeMap,
+    BTreeSet,
     HashSet,
   },
   path::Path,
@@ -48,12 +49,11 @@ pub struct PathStats {
 
 #[derive(Debug)]
 pub struct PackageDiff {
-  pub name:                 String,
-  pub versions:             Vec<VersionDiff>,
-  pub status:               DiffStatus,
-  pub selection:            DerivationSelectionStatus,
-  pub has_omitted_versions: bool,
-  pub size:                 PackageSizeDelta,
+  pub name:      String,
+  /// How the package's versions changed, or `None` if only its size did.
+  pub change:    Option<VersionChange>,
+  pub selection: DerivationSelectionStatus,
+  pub size:      PackageSizeDelta,
 }
 
 /// The most significant kind of change a package went through.
@@ -80,9 +80,10 @@ impl PackageDiff {
   /// Classifies the diff by its most significant change.
   #[must_use]
   pub fn kind(&self) -> ChangeKind {
-    if self.versions.is_empty() {
-      ChangeKind::Size
-    } else if self
+    let Some(change) = &self.change else {
+      return ChangeKind::Size;
+    };
+    if change
       .versions
       .iter()
       .all(|diff| matches!(diff, VersionDiff::AmountChanged { .. }))
@@ -93,23 +94,13 @@ impl PackageDiff {
     }
   }
 
-  fn from_change(
-    change: VersionChange,
-    old: &SnapshotPackages,
-    new: &SnapshotPackages,
-  ) -> Self {
-    Self {
-      selection:            DerivationSelectionStatus::between(
-        &change.name,
-        old,
-        new,
-      ),
-      size:                 PackageSizeDelta::between(&change.name, old, new),
-      name:                 change.name,
-      versions:             change.versions,
-      status:               change.status,
-      has_omitted_versions: change.has_omitted_versions,
-    }
+  /// The status of the version change. Size-only diffs count as changed.
+  #[must_use]
+  pub fn status(&self) -> DiffStatus {
+    self
+      .change
+      .as_ref()
+      .map_or(DiffStatus::Changed, |change| change.status)
   }
 }
 
@@ -178,37 +169,29 @@ fn package_diffs_with_sizes(
   old: &SnapshotPackages,
   new: &SnapshotPackages,
 ) -> Vec<PackageDiff> {
-  let mut diffs = diff_packages(&old.packages, &new.packages)
+  let mut changes = diff_packages(&old.packages, &new.packages);
+  let names = changes
+    .keys()
+    .chain(old.sizes.keys())
+    .chain(new.sizes.keys())
+    .cloned()
+    .collect::<BTreeSet<_>>();
+
+  names
     .into_iter()
-    .map(|change| {
-      (
-        change.name.clone(),
-        PackageDiff::from_change(change, old, new),
-      )
+    .filter_map(|name| {
+      let change = changes.remove(&name);
+      let size = PackageSizeDelta::between(&name, old, new);
+      (change.is_some() || size.is_significant()).then(|| {
+        PackageDiff {
+          selection: DerivationSelectionStatus::between(&name, old, new),
+          name,
+          change,
+          size,
+        }
+      })
     })
-    .collect::<BTreeMap<_, _>>();
-
-  for name in old.sizes.keys().chain(new.sizes.keys()) {
-    if diffs.contains_key(name) {
-      continue;
-    }
-
-    let size = PackageSizeDelta::between(name, old, new);
-    if !size.is_significant() {
-      continue;
-    }
-
-    diffs.insert(name.clone(), PackageDiff {
-      name: name.clone(),
-      versions: Vec::new(),
-      status: DiffStatus::Changed,
-      selection: DerivationSelectionStatus::between(name, old, new),
-      has_omitted_versions: false,
-      size,
-    });
-  }
-
-  diffs.into_values().collect()
+    .collect()
 }
 
 impl PathStats {
@@ -500,9 +483,10 @@ mod tests {
     assert_eq!(report.diffs.len(), 1);
     let diff = &report.diffs[0];
     assert_eq!(diff.name, "helix-tree-sitter-pod");
-    assert_eq!(diff.status, DiffStatus::Changed);
-    assert_eq!(diff.versions.len(), 1);
-    match &diff.versions[0] {
+    let change = diff.change.as_ref().unwrap();
+    assert_eq!(change.status, DiffStatus::Changed);
+    assert_eq!(change.versions.len(), 1);
+    match &change.versions[0] {
       VersionDiff::Changed { old, new } => {
         assert_eq!(old.version.name, old_hash);
         assert_eq!(new.version.name, new_hash);
@@ -538,8 +522,8 @@ mod tests {
     assert_eq!(report.diffs.len(), 1);
     let diff = &report.diffs[0];
     assert_eq!(diff.name, "source");
-    assert_eq!(diff.status, DiffStatus::Changed);
-    assert!(diff.versions.is_empty());
+    assert_eq!(diff.status(), DiffStatus::Changed);
+    assert!(diff.change.is_none());
     assert_eq!(diff.size.old, Size::from_bytes(100));
     assert_eq!(diff.size.new, Size::from_bytes(9_000));
   }
