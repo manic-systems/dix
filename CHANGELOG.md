@@ -64,6 +64,10 @@ This is a changelog of the `dix` repository. It follows the
   `PackageSizeDelta::new(old, new)`.
 - dix links against the system SQLite instead of bundling its own copy, so
   building it needs `libsqlite3` and its headers.
+- **Breaking:** The `dix-diff` crate is merged back into `dix` and is no
+  longer published. `DiffStatus`, `Version`, `VersionAmount` and `VersionDiff`
+  are still exported from `dix`, and the rest of the diff engine is internal.
+- The repository is a single package again, so `cargo install --path .` works.
 
 ## 2.2.0
 

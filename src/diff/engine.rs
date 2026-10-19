@@ -6,28 +6,22 @@ use std::{
 
 use itertools::EitherOrBoth;
 
-use crate::{
+use crate::diff::{
   Version,
   matching::match_version_amounts,
   model::{
     Diff,
     DiffStatus,
+    Package,
     VersionAmount,
     VersionDiff,
-  },
-  snapshot::{
-    Package,
-    PackageSnapshot,
   },
   version::VersionChangeOrdering,
 };
 
 #[must_use]
-pub fn diff_snapshots(
-  old: &PackageSnapshot,
-  new: &PackageSnapshot,
-) -> Vec<Diff> {
-  let mut diffs = build_package_diffs(&old.packages, &new.packages);
+pub fn diff_packages(old: &[Package], new: &[Package]) -> Vec<Diff> {
+  let mut diffs = build_package_diffs(old, new);
   canonicalize_diffs(&mut diffs);
   diffs
 }

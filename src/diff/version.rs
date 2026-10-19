@@ -40,13 +40,14 @@ impl Version {
   }
 
   /// Iterate over components only.
-  pub fn components(&self) -> impl Iterator<Item = VersionComponent<'_>> {
+  pub(crate) fn components(
+    &self,
+  ) -> impl Iterator<Item = VersionComponent<'_>> {
     Pieces::new(&self.name).filter_map(VersionPiece::component)
   }
 
   /// Iterate over all pieces (components and separators).
-  #[must_use]
-  pub fn iter(&self) -> Pieces<'_> {
+  pub(crate) fn pieces(&self) -> Pieces<'_> {
     Pieces::new(&self.name)
   }
 
@@ -194,15 +195,6 @@ impl Ord for Version {
   }
 }
 
-impl<'a> IntoIterator for &'a Version {
-  type Item = VersionPiece<'a>;
-  type IntoIter = Pieces<'a>;
-
-  fn into_iter(self) -> Self::IntoIter {
-    Pieces::new(&self.name)
-  }
-}
-
 /// Iterator over version pieces (components and separators).
 #[derive(Clone, Copy)]
 pub struct Pieces<'a> {
@@ -259,14 +251,6 @@ impl<'a> VersionPiece<'a> {
     match self {
       VersionPiece::Component(c) => Some(c),
       VersionPiece::Separator(_) => None,
-    }
-  }
-
-  #[must_use]
-  pub const fn separator(self) -> Option<&'a str> {
-    match self {
-      VersionPiece::Component(_) => None,
-      VersionPiece::Separator(s) => Some(s),
     }
   }
 }
@@ -349,17 +333,6 @@ impl Ord for VersionComponent<'_> {
 impl fmt::Display for Version {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.write_str(&self.name)
-  }
-}
-
-impl fmt::Write for Version {
-  fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
-    fmt::write(&mut self.name, args)
-  }
-
-  fn write_str(&mut self, s: &str) -> fmt::Result {
-    self.name.push_str(s);
-    Ok(())
   }
 }
 
@@ -484,19 +457,13 @@ mod tests {
   fn version_component_iter() {
     let version = "132.1.2test234-1-man----.--.......---------..---";
 
-    assert_eq!(
-      Version::new(version)
-        .into_iter()
-        .filter_map(VersionPiece::component)
-        .collect::<Vec<_>>(),
-      [
-        VersionComponent("132"),
-        VersionComponent("1"),
-        VersionComponent("2test234"),
-        VersionComponent("1"),
-        VersionComponent("man")
-      ]
-    );
+    assert_eq!(Version::new(version).components().collect::<Vec<_>>(), [
+      VersionComponent("132"),
+      VersionComponent("1"),
+      VersionComponent("2test234"),
+      VersionComponent("1"),
+      VersionComponent("man")
+    ]);
   }
 
   #[test]
@@ -558,7 +525,7 @@ mod tests {
   #[test]
   fn version_piece_iterator_includes_separators() {
     let version = Version::new("1.2.3-alpha");
-    let pieces: Vec<_> = version.into_iter().collect();
+    let pieces: Vec<_> = version.pieces().collect();
     assert_eq!(pieces.len(), 7);
     assert!(matches!(pieces[0], VersionPiece::Component(_)));
     assert!(matches!(pieces[1], VersionPiece::Separator(".")));
@@ -575,9 +542,7 @@ mod tests {
     let sep = VersionPiece::Separator("-");
 
     assert_eq!(comp.component(), Some(VersionComponent("123")));
-    assert_eq!(comp.separator(), None);
     assert_eq!(sep.component(), None);
-    assert_eq!(sep.separator(), Some("-"));
   }
 
   #[test]
@@ -664,15 +629,6 @@ mod tests {
   fn version_display() {
     let v1 = Version::new("1.2.3");
     assert_eq!(format!("{v1}"), "1.2.3");
-  }
-
-  #[test]
-  fn version_write() {
-    use std::fmt::Write;
-
-    let mut v = Version::new("1.0");
-    write!(v, ".{}-beta", 2).unwrap();
-    assert_eq!(v.name, "1.0.2-beta");
   }
 
   #[test]

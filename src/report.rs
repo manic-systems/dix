@@ -6,12 +6,6 @@ use std::{
   path::Path,
 };
 
-use dix_diff::{
-  Diff as EngineDiff,
-  Package,
-  PackageSnapshot,
-  diff_snapshots,
-};
 use misstep::Result;
 use size::Size;
 
@@ -19,6 +13,11 @@ use crate::{
   DiffStatus,
   StorePath,
   VersionDiff,
+  diff::{
+    Diff as EngineDiff,
+    Package,
+    diff_packages,
+  },
   snapshot::{
     StoreSnapshot,
     query_store_snapshot_with_backend,
@@ -172,7 +171,7 @@ fn package_diffs_with_sizes(
   old: &SnapshotPackages,
   new: &SnapshotPackages,
 ) -> Vec<PackageDiff> {
-  let mut diffs = diff_snapshots(&old.snapshot, &new.snapshot)
+  let mut diffs = diff_packages(&old.packages, &new.packages)
     .into_iter()
     .map(|diff| (diff.name.clone(), PackageDiff::from_engine(diff, old, new)))
     .collect::<BTreeMap<_, _>>();
@@ -239,7 +238,7 @@ fn add_package_size(
 
 /// The packages of one side of a diff, keyed by package name.
 struct SnapshotPackages {
-  snapshot: PackageSnapshot,
+  packages: Vec<Package>,
   selected: HashSet<String>,
   sizes:    BTreeMap<String, Size>,
 }
@@ -260,7 +259,7 @@ impl SnapshotPackages {
     }
 
     Self {
-      snapshot: PackageSnapshot::new(packages),
+      packages,
       selected: snapshot
         .selected
         .iter()
