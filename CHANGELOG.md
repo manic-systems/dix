@@ -62,6 +62,8 @@ This is a changelog of the `dix` repository. It follows the
   `report.size_old` instead of `report.size_old()`, `stats.added` instead of
   `stats.added_count()` and `PackageSizeDelta { old, new }` instead of
   `PackageSizeDelta::new(old, new)`.
+- dix links against the system SQLite instead of bundling its own copy, so
+  building it needs `libsqlite3` and its headers.
 
 ## 2.2.0
 

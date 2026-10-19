@@ -58,6 +58,9 @@
 
             buildType = "release";
 
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.sqlite ];
+
             strictDeps = true;
           };
         }
@@ -74,6 +77,9 @@
             cargo-nextest
             # TOML formatting.
             taplo
+
+            pkg-config
+            sqlite
 
             cargo
             clippy
