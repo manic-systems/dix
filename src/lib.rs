@@ -170,15 +170,7 @@ fn is_version_suffix(suffix: &str) -> bool {
     .bytes()
     .next()
     .is_some_and(|byte| byte.is_ascii_digit())
-    || looks_like_git_hash_component(suffix)
-}
-
-fn looks_like_git_hash_component(component: &str) -> bool {
-  (7..=40).contains(&component.len())
-    && component.bytes().all(|byte| byte.is_ascii_hexdigit())
-    && component
-      .bytes()
-      .any(|byte| matches!(byte, b'a'..=b'f' | b'A'..=b'F'))
+    || diff::is_git_hash(suffix)
 }
 
 fn path_to_canonical_string(path: &Path) -> Result<String> {

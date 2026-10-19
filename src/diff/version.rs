@@ -291,6 +291,12 @@ impl VersionComponent<'_> {
   }
 }
 
+/// Whether `component` looks like an abbreviated or full Git commit hash.
+#[must_use]
+pub fn is_git_hash(component: &str) -> bool {
+  is_hex_hash_component(component) && has_ascii_hex_letter(component)
+}
+
 fn is_hex_hash_component(component: &str) -> bool {
   (7..=40).contains(&component.len())
     && component.bytes().all(|b| b.is_ascii_hexdigit())

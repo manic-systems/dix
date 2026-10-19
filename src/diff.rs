@@ -18,4 +18,5 @@ pub use model::{
 pub use version::{
   Version,
   VersionPiece,
+  is_git_hash,
 };
