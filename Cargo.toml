@@ -13,16 +13,31 @@ categories   = [ "command-line-utilities" ]
 include      = [ "CHANGELOG.md", "Cargo.lock", "Cargo.toml", "LICENSE.md", "README.md", "src/**" ]
 
 [dependencies]
-diff               = "0.1.13"
-misstep            = { features = [ "color", "pretty" ], version = "0.4.1" }
-pound              = "0.5.1"
-rusqlite           = { default-features = false, features = [ "cache" ], version = "0.40.0" }
-serde              = { features = [ "derive" ], version = "1.0.228" }
-serde_json         = "1.0.149"
-size               = "0.6.0"
-tracing            = { default-features = false, features = [ "std" ], version = "0.1" }
-tracing-subscriber = { default-features = false, features = [ "ansi" ], version = "0.3" }
-yansi              = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
+diff       = "0.1.13"
+misstep    = { features = [ "color", "pretty" ], version = "0.4.1" }
+pound      = { optional = true, version = "0.5.1" }
+rusqlite   = { default-features = false, features = [ "cache" ], optional = true, version = "0.40.0" }
+serde      = { features = [ "derive" ], version = "1.0.228" }
+serde_json = "1.0.149"
+size       = "0.6.0"
+tracing    = { default-features = false, features = [ "std" ], version = "0.1" }
+yansi      = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
+
+[dependencies.tracing-subscriber]
+default-features = false
+features         = [ "ansi" ]
+optional         = true
+version          = "0.3"
+
+[features]
+default = [ "cli", "store" ]
+cli = [ "dep:pound", "dep:tracing-subscriber", "store" ]
+store = [ "dep:rusqlite" ]
+
+[[bin]]
+name              = "dix"
+path              = "src/main.rs"
+required-features = [ "cli" ]
 
 [dev-dependencies]
 proptest = "1.6.0"

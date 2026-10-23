@@ -8,77 +8,88 @@ mod queries;
 // Make the test db available for the rest of the crate.
 #[cfg(test)] pub mod test_utils;
 
-use std::fmt::Display;
+use std::{
+  fmt::Display,
+  path::Path,
+};
 
 pub use db::DbConnection;
 use misstep::{
   Result,
+  ResultExt as _,
+  bail,
   report,
 };
 pub use nix_command::CommandBackend;
-use serde::{
-  Deserialize,
-  Serialize,
-};
-use size::Size;
 use tracing::warn;
 
-use crate::StorePath;
+use crate::{
+  SnapshotDocument,
+  StorePath,
+  StorePathInfo,
+  StoreSnapshot,
+};
 
 /// The normal database connection
 pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StorePathInfo {
-  pub path:     StorePath,
-  #[serde(with = "size_bytes")]
-  pub nar_size: Size,
+/// Queries Nix store data for one path using a caller-provided backend.
+///
+/// # Returns
+///
+/// The closure of `path` with NAR sizes, and the packages it selects.
+///
+/// # Errors
+///
+/// Returns an error if the backend cannot query the path, or the path is not
+/// a valid store path.
+pub fn query_store_snapshot_with_backend(
+  backend: &dyn StoreBackend,
+  path: &StorePath,
+) -> Result<StoreSnapshot> {
+  tracing::debug!(path = %path.display(), "querying closure path info");
+  let closure = backend.query_closure_path_info(path).with_context(|| {
+    format!("failed to query closure path info of '{}'", path.display())
+  })?;
+  // The closure of a valid path contains at least the path itself.
+  if closure.is_empty() {
+    bail!("'{}' is not a valid store path", path.display());
+  }
+
+  tracing::debug!(path = %path.display(), "querying system derivations");
+  let selected = backend.query_system_derivations(path).with_context(|| {
+    format!("failed to query system derivations of '{}'", path.display())
+  })?;
+
+  Ok(StoreSnapshot { closure, selected })
 }
 
-/// (De)serializes a [`Size`] as a plain byte count.
-mod size_bytes {
-  use serde::{
-    Deserialize as _,
-    Deserializer,
-    Serializer,
-  };
-  use size::Size;
-
-  /// Serializes `size` as its byte count.
-  ///
-  /// # Returns
-  ///
-  /// The serializer's output.
-  ///
-  /// # Errors
-  ///
-  /// Returns the serializer's error if writing the number fails.
-  #[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "signature required by `serde(with)`"
-  )]
-  pub fn serialize<S: Serializer>(
-    size: &Size,
-    serializer: S,
-  ) -> Result<S::Ok, S::Error> {
-    serializer.serialize_i64(size.bytes())
-  }
-
-  /// Deserializes a [`Size`] from its byte count.
-  ///
-  /// # Returns
-  ///
-  /// The size.
-  ///
-  /// # Errors
-  ///
-  /// Returns the deserializer's error if the value is not an integer.
-  pub fn deserialize<'de, D: Deserializer<'de>>(
-    deserializer: D,
-  ) -> Result<Size, D::Error> {
-    i64::deserialize(deserializer).map(Size::from_bytes)
-  }
+/// Canonicalizes `path` and queries a
+/// [`SnapshotDocument`](crate::SnapshotDocument) for it.
+///
+/// # Returns
+///
+/// A snapshot of the store path that `path` resolves to.
+///
+/// # Errors
+///
+/// Returns an error if the path cannot be canonicalized, does not resolve to
+/// a store path, or the store queries fail.
+pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
+  let canonical = path.canonicalize().with_context(|| {
+    format!("failed to canonicalize path '{}'", path.display())
+  })?;
+  let store_path = canonical
+    .into_os_string()
+    .into_string()
+    .map_err(|path| report!("path '{}' is not valid unicode", path.display()))
+    .and_then(StorePath::try_from)?;
+  let snapshot = STORE
+    .with(|store| query_store_snapshot_with_backend(store, &store_path))?;
+  Ok(SnapshotDocument {
+    path: store_path,
+    snapshot,
+  })
 }
 
 /// Defines an interface for interacting with a Nix database.
@@ -202,6 +213,8 @@ impl StoreBackend for CombinedStoreBackend {
 #[cfg(test)]
 mod test {
   use std::fmt;
+
+  use size::Size;
 
   use super::*;
 

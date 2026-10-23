@@ -15,9 +15,9 @@ use size::Size;
 
 use crate::{
   StorePath,
+  StorePathInfo,
   store::{
     StoreBackend,
-    StorePathInfo,
     queries,
   },
 };

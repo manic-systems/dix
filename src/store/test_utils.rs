@@ -414,7 +414,7 @@ mod tests {
 
     let conn = DbConnection::open(&db_path).unwrap();
     let error =
-      crate::snapshot::query_store_snapshot_with_backend(&conn, &unregistered)
+      crate::store::query_store_snapshot_with_backend(&conn, &unregistered)
         .unwrap_err()
         .to_string();
     assert!(error.contains("is not a valid store path"));
