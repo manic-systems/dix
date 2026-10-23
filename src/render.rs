@@ -20,7 +20,6 @@ use itertools::{
   Itertools,
 };
 use size::Size;
-use unicode_width::UnicodeWidthStr as _;
 use yansi::{
   Paint as _,
   Painted,
@@ -163,7 +162,8 @@ fn render_diffs(
   let name_width = diffs
     .iter()
     .filter(|diff| options.shows(diff))
-    .map(|diff| diff.name.width())
+    // Store path names are ASCII, so their length is their width.
+    .map(|diff| diff.name.len())
     .max()
     .unwrap_or(0)
     + 1;
