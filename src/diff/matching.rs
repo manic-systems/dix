@@ -3,10 +3,9 @@ use std::{
   mem::swap,
 };
 
-use itertools::EitherOrBoth;
-
 use crate::diff::{
   VersionAmount,
+  VersionDiff,
   version::VersionComponent,
 };
 
@@ -143,18 +142,19 @@ fn version_components(
 /// 2. Minimizes the total edit distance between paired versions.
 /// 3. Never crosses two version pairs.
 ///
-/// Returns a vector of paired or unpaired versions (as `EitherOrBoth` enum).
+/// Paired versions are returned as changed, unpaired ones as removed from
+/// `from` or added in `to`.
 #[must_use]
-pub fn match_version_amounts<'a>(
-  from: &'a [VersionAmount],
-  to: &'a [VersionAmount],
-) -> Vec<EitherOrBoth<&'a VersionAmount>> {
+pub fn match_version_amounts(
+  from: &[VersionAmount],
+  to: &[VersionAmount],
+) -> Vec<VersionDiff> {
   // Early return for empty inputs
   if from.is_empty() {
-    return to.iter().map(EitherOrBoth::Right).collect();
+    return to.iter().cloned().map(VersionDiff::Added).collect();
   }
   if to.is_empty() {
-    return from.iter().map(EitherOrBoth::Left).collect();
+    return from.iter().cloned().map(VersionDiff::Removed).collect();
   }
 
   // Equal-length order-preserving matchings have exactly one solution.
@@ -162,7 +162,7 @@ pub fn match_version_amounts<'a>(
     return from
       .iter()
       .zip(to)
-      .map(|(from, to)| EitherOrBoth::Both(from, to))
+      .map(|(old, new)| changed(old, new))
       .collect();
   }
 
@@ -183,11 +183,10 @@ pub fn match_version_amounts<'a>(
   // independent of whether the assignment matrix was transposed.
   let mut matched_from = vec![false; from.len()];
   let mut matched_to = vec![false; to.len()];
-  let mut pairings =
-    Vec::<EitherOrBoth<&VersionAmount>>::with_capacity(from.len() + to.len());
+  let mut pairings = Vec::with_capacity(from.len() + to.len());
 
   for (from_index, to_index) in matchings {
-    pairings.push(EitherOrBoth::Both(&from[from_index], &to[to_index]));
+    pairings.push(changed(&from[from_index], &to[to_index]));
     matched_from[from_index] = true;
     matched_to[to_index] = true;
   }
@@ -197,16 +196,23 @@ pub fn match_version_amounts<'a>(
       .iter()
       .enumerate()
       .filter(|(index, _)| !matched_from[*index])
-      .map(|(_, version)| EitherOrBoth::Left(version)),
+      .map(|(_, version)| VersionDiff::Removed(version.clone())),
   );
   pairings.extend(
     to.iter()
       .enumerate()
       .filter(|(index, _)| !matched_to[*index])
-      .map(|(_, version)| EitherOrBoth::Right(version)),
+      .map(|(_, version)| VersionDiff::Added(version.clone())),
   );
 
   pairings
+}
+
+fn changed(old: &VersionAmount, new: &VersionAmount) -> VersionDiff {
+  VersionDiff::Changed {
+    old: old.clone(),
+    new: new.clone(),
+  }
 }
 
 #[cfg(test)]
@@ -457,8 +463,11 @@ mod tests {
     let matched = match_version_amounts(&left, &right);
 
     assert_eq!(matched.len(), 2);
-    assert!(matched.iter().all(EitherOrBoth::has_left));
-    assert!(matched.iter().all(EitherOrBoth::has_right));
+    assert!(
+      matched
+        .iter()
+        .all(|diff| matches!(diff, VersionDiff::Changed { .. }))
+    );
   }
 
   #[test]
@@ -468,11 +477,11 @@ mod tests {
 
     let result = match_version_amounts(empty, &versions);
     assert_eq!(result.len(), 1);
-    assert!(matches!(result[0], EitherOrBoth::Right(_)));
+    assert!(matches!(result[0], VersionDiff::Added(_)));
 
     let result = match_version_amounts(&versions, empty);
     assert_eq!(result.len(), 1);
-    assert!(matches!(result[0], EitherOrBoth::Left(_)));
+    assert!(matches!(result[0], VersionDiff::Removed(_)));
 
     let result = match_version_amounts(empty, empty);
     assert_eq!(result.len(), 0);
@@ -486,7 +495,7 @@ mod tests {
     let result = match_version_amounts(&a, &b);
     let both_count = result
       .iter()
-      .filter(|result| matches!(result, EitherOrBoth::Both(_, _)))
+      .filter(|result| matches!(result, VersionDiff::Changed { .. }))
       .count();
 
     assert_eq!(both_count, 2);
@@ -521,8 +530,8 @@ mod tests {
     assert!(result.iter().any(|result| {
       matches!(
         result,
-        EitherOrBoth::Both(left, right)
-          if left.version.name == "2.0.0" && right.version.name == "2.0.0"
+        VersionDiff::Changed { old, new }
+          if old.version.name == "2.0.0" && new.version.name == "2.0.0"
       )
     }));
   }

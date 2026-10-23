@@ -4,8 +4,6 @@ use std::{
   num::NonZeroUsize,
 };
 
-use itertools::EitherOrBoth;
-
 use crate::diff::{
   Version,
   matching::match_version_amounts,
@@ -169,7 +167,7 @@ fn version_change(versions: &PackageVersions) -> Option<VersionChange> {
     }
   }
 
-  let mut diffs = version_diffs(&old_only, &new_only);
+  let mut diffs = match_version_amounts(&old_only, &new_only);
   diffs.extend(amount_diffs);
   if diffs.is_empty() {
     return None;
@@ -188,27 +186,6 @@ fn version_change(versions: &PackageVersions) -> Option<VersionChange> {
     status,
     has_omitted_versions,
   })
-}
-
-fn version_diffs(
-  old_versions: &[VersionAmount],
-  new_versions: &[VersionAmount],
-) -> Vec<VersionDiff> {
-  match_version_amounts(old_versions, new_versions)
-    .into_iter()
-    .map(|ver_diff| {
-      match ver_diff {
-        EitherOrBoth::Left(old) => VersionDiff::Removed(old.clone()),
-        EitherOrBoth::Right(new) => VersionDiff::Added(new.clone()),
-        EitherOrBoth::Both(old, new) => {
-          VersionDiff::Changed {
-            old: old.clone(),
-            new: new.clone(),
-          }
-        },
-      }
-    })
-    .collect()
 }
 
 /// Classifies the version diffs of a package that exists on both sides.
