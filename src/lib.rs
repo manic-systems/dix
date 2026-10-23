@@ -40,6 +40,9 @@ pub use snapshot::{
   query_snapshot_document,
 };
 mod store;
+/// The size type used in reports and snapshots, re-exported so users do
+/// not need to depend on a matching version of the `size` crate.
+pub use size::Size;
 pub use store::StorePathInfo;
 
 /// A validated store path of the form `/nix/store/<hash>-<name>`.

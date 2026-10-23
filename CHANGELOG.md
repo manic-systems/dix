@@ -26,6 +26,7 @@ This is a changelog of the `dix` repository. It follows the
   versions before parsing anything else.
 - `dix diff` accepts JSON files written by `dix snapshot` in place of either
   store path.
+- `Size`, used in reports and snapshots, is re-exported from the crate root.
 
 ### Fixed
 
