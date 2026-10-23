@@ -25,19 +25,6 @@ pub struct StoreSnapshot {
   pub selected: Vec<StorePath>,
 }
 
-/// Queries Nix store data for one path and returns a reusable snapshot.
-///
-/// # Returns
-///
-/// The closure of `path` with NAR sizes, and the packages it selects.
-///
-/// # Errors
-///
-/// Returns an error if the path queries fail.
-pub fn query_store_snapshot(path: &Path) -> Result<StoreSnapshot> {
-  query_store_snapshot_with_backend(&CombinedStoreBackend::open(), path)
-}
-
 /// Queries Nix store data for one path using a caller-provided backend.
 ///
 /// # Returns
@@ -148,7 +135,10 @@ pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
     format!("failed to canonicalize path '{}'", path.display())
   })?;
   let store_path = StorePath::try_from(canonical)?;
-  let snapshot = query_store_snapshot(&store_path)?;
+  let snapshot = query_store_snapshot_with_backend(
+    &CombinedStoreBackend::open(),
+    &store_path,
+  )?;
   Ok(SnapshotDocument::new(store_path, snapshot))
 }
 

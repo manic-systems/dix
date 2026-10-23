@@ -56,8 +56,9 @@ This is a changelog of the `dix` repository. It follows the
   selected packages being bold.
 - **Breaking:** `write_diff_report` takes a `RenderOptions` argument and
   returns the number of hidden package diffs instead of the number written.
-- **Breaking:** Removed `query_diff_report`. Use `diff_store_snapshots` on
-  snapshots from `query_store_snapshot` instead.
+- **Breaking:** Removed `query_diff_report` and `query_store_snapshot`. Use
+  `diff_store_snapshots` on the `snapshot` of two `query_snapshot_document`
+  results instead.
 - **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
   serializes an already queried report instead of querying and printing it.
 - **Breaking:** `DiffReport`, `PathStats` and `PackageSizeDelta` expose public
