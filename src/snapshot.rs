@@ -14,7 +14,7 @@ use serde::{
 use crate::{
   StorePath,
   store::{
-    CombinedStoreBackend,
+    STORE,
     StoreBackend,
     StorePathInfo,
   },
@@ -148,10 +148,8 @@ pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
     format!("failed to canonicalize path '{}'", path.display())
   })?;
   let store_path = StorePath::try_from(canonical)?;
-  let snapshot = query_store_snapshot_with_backend(
-    &CombinedStoreBackend::open(),
-    &store_path,
-  )?;
+  let snapshot = STORE
+    .with(|store| query_store_snapshot_with_backend(store, &store_path))?;
   Ok(SnapshotDocument {
     path: store_path,
     snapshot,

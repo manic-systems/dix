@@ -57,9 +57,10 @@ This is a changelog of the `dix` repository. It follows the
   selected packages being bold.
 - **Breaking:** `write_diff_report` takes a `RenderOptions` argument and
   returns the number of hidden package diffs instead of the number written.
-- **Breaking:** Removed `query_diff_report` and `query_store_snapshot`. Use
-  `diff_store_snapshots` on the `snapshot` of two `query_snapshot_document`
-  results instead.
+- **Breaking:** Removed `query_diff_report`, `query_adjacent_diff_reports` and
+  `query_store_snapshot`. Use `diff_store_snapshots` on the `snapshot` of
+  `query_snapshot_document` results instead. Store queries on a thread share
+  one connection to the Nix database.
 - **Breaking:** The `report` and `snapshot` modules are private. Their items
   are still exported from the crate root.
 - **Breaking:** `StorePathInfo` exposes public `path` and `nar_size` fields
