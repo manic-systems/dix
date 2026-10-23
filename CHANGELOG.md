@@ -61,7 +61,7 @@ This is a changelog of the `dix` repository. It follows the
   results instead.
 - **Breaking:** The `report` and `snapshot` modules are private. Their items
   are still exported from the crate root.
-- **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
+- **Breaking:** `json::display_diff` is replaced by `json::JsonReport`, which
   serializes an already queried report instead of querying and printing it.
 - **Breaking:** `DiffReport`, `PathStats` and `PackageSizeDelta` expose public
   fields instead of accessor methods, reverting the 2.0.0 change for
