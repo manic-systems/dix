@@ -5,17 +5,8 @@ use crate::diff::Version;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Package {
   pub name:    String,
-  pub version: Version,
-}
-
-impl Package {
-  #[must_use]
-  pub fn new(name: impl Into<String>, version: impl Into<Version>) -> Self {
-    Self {
-      name:    name.into(),
-      version: version.into(),
-    }
-  }
+  /// `None` for packages without a version, such as flake sources.
+  pub version: Option<Version>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -27,15 +18,17 @@ pub struct VersionChange {
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct VersionAmount {
-  pub version: Version,
+  /// `None` for packages without a version, such as flake sources.
+  pub version: Option<Version>,
   pub amount:  NonZeroUsize,
 }
 
 impl VersionAmount {
+  /// Creates an amount of a present `version`.
   #[must_use]
   pub fn new(version: impl Into<Version>, amount: NonZeroUsize) -> Self {
     Self {
-      version: version.into(),
+      version: Some(version.into()),
       amount,
     }
   }
@@ -50,7 +43,7 @@ pub enum VersionDiff {
     new: VersionAmount,
   },
   AmountChanged {
-    version:    Version,
+    version:    Option<Version>,
     old_amount: NonZeroUsize,
     new_amount: NonZeroUsize,
   },

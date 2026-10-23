@@ -367,12 +367,23 @@ fn fmt_version_diffs(
         append_sep(&mut old_acc, &mut old_wrote)?;
         append_sep(&mut new_acc, &mut new_wrote)?;
 
-        fmt_single_version_diff(
-          &mut old_acc,
-          &mut new_acc,
-          &old.version,
-          &new.version,
-        )?;
+        if let (Some(old_version), Some(new_version)) =
+          (&old.version, &new.version)
+        {
+          fmt_single_version_diff(
+            &mut old_acc,
+            &mut new_acc,
+            old_version,
+            new_version,
+          )?;
+        } else {
+          write_version(&mut old_acc, old.version.as_ref(), |value| {
+            value.red()
+          })?;
+          write_version(&mut new_acc, new.version.as_ref(), |value| {
+            value.green()
+          })?;
+        }
         write_changed_amounts(
           &mut old_acc,
           &mut new_acc,
@@ -388,8 +399,8 @@ fn fmt_version_diffs(
         append_sep(&mut old_acc, &mut old_wrote)?;
         append_sep(&mut new_acc, &mut new_wrote)?;
 
-        write_version(&mut old_acc, version, |value| value.yellow())?;
-        write_version(&mut new_acc, version, |value| value.yellow())?;
+        write_version(&mut old_acc, version.as_ref(), |value| value.yellow())?;
+        write_version(&mut new_acc, version.as_ref(), |value| value.yellow())?;
         write_amount_suffix(&mut old_acc, *old_amount, |value| value.red())?;
         write_amount_suffix(&mut new_acc, *new_amount, |value| value.green())?;
       },
@@ -411,15 +422,19 @@ fn write_version_amount(
   version: &VersionAmount,
   style: impl Copy + Fn(Painted<&str>) -> Painted<&str>,
 ) -> fmt::Result {
-  write_version(buf, &version.version, style)?;
+  write_version(buf, version.version.as_ref(), style)?;
   write_amount_suffix(buf, version.amount, style)
 }
 
+/// Writes `version`, or `<none>` if there is none.
 fn write_version(
   buf: &mut String,
-  version: &Version,
+  version: Option<&Version>,
   style: impl Copy + Fn(Painted<&str>) -> Painted<&str>,
 ) -> fmt::Result {
+  let Some(version) = version else {
+    return write!(buf, "{}", style(Painted::new("<none>")));
+  };
   for piece in version.pieces() {
     write_version_piece(buf, &piece, style)?;
   }
@@ -728,7 +743,7 @@ mod tests {
     yansi::disable();
 
     let version_diffs = [VersionDiff::AmountChanged {
-      version:    Version::new("1.0.0"),
+      version:    Some(Version::new("1.0.0")),
       old_amount: amount(1),
       new_amount: amount(2),
     }];

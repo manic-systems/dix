@@ -73,6 +73,10 @@ This is a changelog of the `dix` repository. It follows the
   `TryFrom<PathBuf>`, only accepts paths of the form `/nix/store/<hash>-<name>`
   and dereferences to `Path` instead of `PathBuf`. `StorePath::as_str` returns
   it as a string.
+- **Breaking:** Packages without a version, such as flake sources, have a
+  `None` version instead of the version `"<none>"`. `VersionAmount::version`
+  and the `version` of `VersionDiff::AmountChanged` are `Option<Version>`, and
+  their `name` in the JSON output is `null`.
 - **Breaking:** `json::display_diff` is replaced by `json::JsonReport`, which
   serializes an already queried report instead of querying and printing it.
 - **Breaking:** `DiffReport`, `PathStats` and `PackageSizeDelta` expose public
