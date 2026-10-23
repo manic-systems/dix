@@ -46,7 +46,6 @@ pub use snapshot::{
   SnapshotDocument,
   StoreSnapshot,
   query_snapshot_document,
-  query_store_snapshot,
 };
 mod store;
 pub use store::StorePathInfo;
