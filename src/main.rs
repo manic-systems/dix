@@ -288,7 +288,12 @@ fn print_diff(
       dix::write_hidden_note(&mut io::stdout().lock(), hidden, "--full")?;
       Ok(())
     },
-    OutputFormat::Json => json::write_report(io::stdout(), &report),
+    OutputFormat::Json => {
+      Ok(serde_json::to_writer(
+        io::stdout(),
+        &json::JsonReport::from(&report),
+      )?)
+    },
   }
 }
 

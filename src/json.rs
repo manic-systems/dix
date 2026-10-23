@@ -1,9 +1,3 @@
-use std::io::Write;
-
-use misstep::{
-  Result,
-  ResultExt as _,
-};
 use serde::Serialize;
 
 use crate::{
@@ -17,21 +11,6 @@ use crate::{
   VersionAmount,
   VersionDiff,
 };
-
-/// Writes the diff report as JSON.
-///
-/// # Returns
-///
-/// `Ok(())` once the report is written to `out`.
-///
-/// # Errors
-///
-/// Returns an error if writing JSON fails.
-pub fn write_report(out: impl Write, report: &DiffReport) -> Result<()> {
-  serde_json::to_writer(out, &JsonReport::from(report))
-    .context("Failed to write json output.")
-    .erase()
-}
 
 #[derive(Serialize)]
 pub struct JsonReport<'a> {
@@ -253,9 +232,8 @@ mod tests {
       size_new:   Size::from_bytes(115_001_000),
     };
 
-    let mut actual_output = Vec::new();
-    write_report(&mut actual_output, &report).unwrap();
-    let actual_output = String::from_utf8(actual_output).unwrap();
+    let actual_output =
+      serde_json::to_string(&JsonReport::from(&report)).unwrap();
     assert_eq!(expected_output, &actual_output);
   }
 }
