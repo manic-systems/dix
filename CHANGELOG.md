@@ -48,6 +48,7 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Removed the `json` cargo feature. `serde` and `serde_json` are
   now always required.
 - Logs are now written to stderr instead of stdout.
+- `RUST_LOG` is no longer read. Use `-v` (repeatable) to show more log output.
 - Packages whose version did not change are hidden unless their size changed
   by at least `--min-size-delta` (default 1 MiB). A note at the end of the
   output says how many were hidden. Pass `--full` to `dix diff` or `dix last`

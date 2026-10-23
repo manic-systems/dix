@@ -184,20 +184,13 @@ fn main() -> misstep::Result<()> {
   });
 
   tracing_subscriber::fmt()
-    .with_env_filter(
-      tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(
-          match verbose {
-            0 => tracing::Level::ERROR,
-            1 => tracing::Level::WARN,
-            2 => tracing::Level::INFO,
-            3 => tracing::Level::DEBUG,
-            _ => tracing::Level::TRACE,
-          }
-          .into(),
-        )
-        .from_env_lossy(),
-    )
+    .with_max_level(match verbose {
+      0 => tracing::Level::ERROR,
+      1 => tracing::Level::WARN,
+      2 => tracing::Level::INFO,
+      3 => tracing::Level::DEBUG,
+      _ => tracing::Level::TRACE,
+    })
     .with_writer(io::stderr)
     .with_ansi(should_style())
     .with_target(false)
