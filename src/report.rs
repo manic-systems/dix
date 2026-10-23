@@ -197,8 +197,8 @@ fn package_diffs_with_sizes(
 impl PathStats {
   #[must_use]
   fn between(old: &[StorePathInfo], new: &[StorePathInfo]) -> Self {
-    let old_paths = old.iter().map(StorePathInfo::path).collect::<HashSet<_>>();
-    let new_paths = new.iter().map(StorePathInfo::path).collect::<HashSet<_>>();
+    let old_paths = old.iter().map(|info| &info.path).collect::<HashSet<_>>();
+    let new_paths = new.iter().map(|info| &info.path).collect::<HashSet<_>>();
 
     Self {
       old:     old_paths.len(),
@@ -210,12 +210,7 @@ impl PathStats {
 }
 
 fn total_nar_size(paths: &[StorePathInfo]) -> Size {
-  Size::from_bytes(
-    paths
-      .iter()
-      .map(|path| path.nar_size().bytes())
-      .sum::<i64>(),
-  )
+  Size::from_bytes(paths.iter().map(|path| path.nar_size.bytes()).sum::<i64>())
 }
 
 fn add_package_size(
@@ -245,11 +240,11 @@ impl SnapshotPackages {
     let mut sizes = BTreeMap::<String, Size>::new();
 
     for info in &snapshot.closure {
-      let Some((name, version)) = parse_store_path_lossy(info.path(), side)
+      let Some((name, version)) = parse_store_path_lossy(&info.path, side)
       else {
         continue;
       };
-      add_package_size(&mut sizes, name, info.nar_size());
+      add_package_size(&mut sizes, name, info.nar_size);
       packages.push(Package::new(name, version.unwrap_or("<none>")));
     }
 
@@ -376,7 +371,10 @@ mod tests {
   }
 
   fn store_path_info(name: &str, nar_size: i64) -> StorePathInfo {
-    StorePathInfo::new(store_path(name), Size::from_bytes(nar_size))
+    StorePathInfo {
+      path:     store_path(name),
+      nar_size: Size::from_bytes(nar_size),
+    }
   }
 
   fn store_path_info_with_hash(
@@ -384,10 +382,10 @@ mod tests {
     name: &str,
     nar_size: i64,
   ) -> StorePathInfo {
-    StorePathInfo::new(
-      store_path_with_hash(hash, name),
-      Size::from_bytes(nar_size),
-    )
+    StorePathInfo {
+      path:     store_path_with_hash(hash, name),
+      nar_size: Size::from_bytes(nar_size),
+    }
   }
 
   #[test]
@@ -512,7 +510,7 @@ mod tests {
     let new_info = store_path_info("package-2.0", 200);
     let old_snapshot = StoreSnapshot {
       closure:  vec![old_info.clone()],
-      selected: vec![old_info.path().clone()],
+      selected: vec![old_info.path],
     };
     let new_snapshot = StoreSnapshot {
       closure:  vec![new_info],

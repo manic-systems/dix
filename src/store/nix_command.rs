@@ -109,10 +109,10 @@ fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
       .parse::<i64>()
       .context("failed to parse NAR size from nix path-info output")?;
 
-    infos.push(StorePathInfo::new(
-      StorePath::try_from(PathBuf::from(path))?,
-      Size::from_bytes(bytes),
-    ));
+    infos.push(StorePathInfo {
+      path:     StorePath::try_from(PathBuf::from(path))?,
+      nar_size: Size::from_bytes(bytes),
+    });
   }
 
   Ok(infos)
@@ -171,7 +171,7 @@ mod tests {
   fn parse_path_info_size_output_reads_nar_sizes() {
     let info = parse_path_info_size_output(&path_info_output()).unwrap();
     assert_eq!(info.len(), FAKE_PATHS.lines().count());
-    assert_eq!(info[0].nar_size(), Size::from_bytes(1));
-    assert_eq!(info[2].nar_size(), Size::from_bytes(3));
+    assert_eq!(info[0].nar_size, Size::from_bytes(1));
+    assert_eq!(info[2].nar_size, Size::from_bytes(3));
   }
 }

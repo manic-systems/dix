@@ -32,7 +32,7 @@ pub fn closure_size(backend: &dyn StoreBackend, path: &Path) -> Result<Size> {
     backend
       .query_closure_path_info(path)?
       .iter()
-      .map(|info| info.nar_size().bytes())
+      .map(|info| info.nar_size.bytes())
       .sum::<i64>(),
   ))
 }
@@ -453,7 +453,7 @@ mod tests {
     let info = conn.query_closure_path_info(&root).unwrap();
     assert_eq!(info.len(), 3);
     assert_eq!(
-      info.iter().map(|path| path.nar_size().bytes()).sum::<i64>(),
+      info.iter().map(|path| path.nar_size.bytes()).sum::<i64>(),
       200,
     );
   }
