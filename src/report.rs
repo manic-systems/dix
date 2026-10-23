@@ -14,8 +14,10 @@ use crate::{
     VersionChange,
     diff_packages,
   },
-  snapshot::StoreSnapshot,
-  store::StorePathInfo,
+  snapshot::{
+    StorePathInfo,
+    StoreSnapshot,
+  },
 };
 
 const PACKAGE_SIZE_DELTA_SIGNIFICANCE_THRESHOLD_BYTES: i64 = 8 * 1024;

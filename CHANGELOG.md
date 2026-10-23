@@ -27,6 +27,9 @@ This is a changelog of the `dix` repository. It follows the
 - `dix diff` accepts JSON files written by `dix snapshot` in place of either
   store path.
 - `Size`, used in reports and snapshots, is re-exported from the crate root.
+- Added the default `cli` and `store` features. Library users that only diff
+  snapshots can disable default features to drop the SQLite and command-line
+  dependencies. `query_snapshot_document` requires `store`.
 
 ### Fixed
 

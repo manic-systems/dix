@@ -16,10 +16,8 @@ use size::Size;
 
 use crate::{
   StorePath,
-  store::{
-    StoreBackend,
-    StorePathInfo,
-  },
+  StorePathInfo,
+  store::StoreBackend,
 };
 
 /// Uses nix commands to perform queries.
