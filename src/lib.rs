@@ -95,9 +95,8 @@ impl TryFrom<PathBuf> for StorePath {
           .is_ok_and(|dir| path.starts_with(dir)))
     {
       bail!(
-        "path {path} must start with /nix/store or {temp_dir}",
-        path = path.display(),
-        temp_dir = std::env::temp_dir().display(),
+        "path {path} must start with /nix/store",
+        path = path.display()
       );
     }
     tracing::trace!(path = %path.display(), "store path validated");
