@@ -201,15 +201,12 @@ impl StoreBackend for CombinedStoreBackend {
 
 #[cfg(test)]
 mod test {
-  use std::{
-    fmt,
-    path::PathBuf,
-  };
+  use std::fmt;
 
   use super::*;
 
   fn dummy_path() -> StorePath {
-    StorePath::try_from(PathBuf::from(
+    StorePath::try_from(String::from(
       "/nix/store/0123456789abcdefghijklmnopqrstuv-dummy",
     ))
     .unwrap()

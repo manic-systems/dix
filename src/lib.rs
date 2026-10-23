@@ -1,13 +1,9 @@
-use std::path::{
-  Path,
-  PathBuf,
-};
+use std::path::Path;
 
 use misstep::{
   Report,
   Result,
   bail,
-  report,
 };
 
 mod diff;
@@ -46,9 +42,9 @@ pub use snapshot::{
 mod store;
 pub use store::StorePathInfo;
 
-/// A validated store path. Always starts with `/nix/store`.
+/// A validated store path of the form `/nix/store/<hash>-<name>`.
 ///
-/// Can be created using `StorePath::try_from(path_buf)`.
+/// Can be created using `StorePath::try_from(string)`.
 #[derive(
   Debug,
   Clone,
@@ -60,7 +56,7 @@ pub use store::StorePathInfo;
   serde::Serialize,
   serde::Deserialize,
 )]
-#[serde(try_from = "PathBuf", into = "PathBuf")]
+#[serde(try_from = "String", into = "String")]
 pub struct StorePath(String);
 
 /// The directory every store path is directly inside of.
@@ -69,9 +65,9 @@ const STORE_DIR: &str = "/nix/store/";
 /// Length of the hash at the start of a store path's file name.
 const HASH_LEN: usize = 32;
 
-impl From<StorePath> for PathBuf {
+impl From<StorePath> for String {
   fn from(path: StorePath) -> Self {
-    path.0.into()
+    path.0
   }
 }
 
@@ -83,15 +79,12 @@ impl std::ops::Deref for StorePath {
   }
 }
 
-impl TryFrom<PathBuf> for StorePath {
+impl TryFrom<String> for StorePath {
   type Error = Report;
 
   /// Accepts paths of the form `/nix/store/<hash>-<name>`.
-  fn try_from(path: PathBuf) -> Result<Self> {
-    tracing::trace!(path = %path.display(), "validating store path");
-    let path = path.into_os_string().into_string().map_err(|path| {
-      report!("path '{}' is not valid unicode", path.display())
-    })?;
+  fn try_from(path: String) -> Result<Self> {
+    tracing::trace!(path, "validating store path");
 
     let is_store_path = path
       .strip_prefix(STORE_DIR)
@@ -162,7 +155,7 @@ mod tests {
   proptest! {
     #[test]
     fn parses_valid_paths(s in r"/nix/store/[a-z0-9A-Z]{32}-[-A-Za-z0-9._+~]{1,64}") {
-      let path = PathBuf::from(s);
+      let path = s;
       let store_path = StorePath::try_from(path)
         .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
       let (_name, _version) = store_path.name_and_version();
@@ -174,16 +167,16 @@ mod tests {
   #[test]
   fn test_store_path_from_nix_store() {
     let path =
-      PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
+      String::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path = StorePath::try_from(path.clone())
       .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
-    assert_eq!(PathBuf::from(store_path), path);
+    assert_eq!(String::from(store_path), path);
   }
 
   #[test]
   fn test_invalid_store_path() {
     let path =
-      PathBuf::from("/invalid/prefix/0123456789abcdefghijklmnopqrstuv-foo-1.0");
+      String::from("/invalid/prefix/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path = StorePath::try_from(path);
     assert!(store_path.is_err());
   }
@@ -191,7 +184,7 @@ mod tests {
   #[test]
   fn test_name_and_version_parsing_store_path() {
     let path =
-      PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
+      String::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0");
     let store_path = StorePath::try_from(path)
       .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let (name, version) = store_path.name_and_version();
@@ -202,7 +195,7 @@ mod tests {
   #[test]
   fn test_name_and_version_parsing_hyphenated_version() {
     let path =
-      PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0-bin");
+      String::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0-bin");
     let store_path = StorePath::try_from(path)
       .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let (name, version) = store_path.name_and_version();
@@ -212,7 +205,7 @@ mod tests {
 
   #[test]
   fn test_name_and_version_parsing_git_hash_version() {
-    let path = PathBuf::from(
+    let path = String::from(
       "/nix/store/0123456789abcdefghijklmnopqrstuv-helix-tree-sitter-pod-\
        cd1931314beafeebc957964c65802961e283411e",
     );
@@ -226,7 +219,7 @@ mod tests {
   #[test]
   fn test_name_and_version_parsing_derivation_path() {
     let path =
-      PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0.drv");
+      String::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo-1.0.drv");
     let store_path = StorePath::try_from(path)
       .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
     let (name, version) = store_path.name_and_version();
@@ -237,7 +230,7 @@ mod tests {
 
   #[test]
   fn test_name_and_version_parsing_derivation_patch() {
-    let path = PathBuf::from(
+    let path = String::from(
       "/nix/store/0123456789abcdefghijklmnopqrstuv-CVE-2026-3184.patch.drv",
     );
     let store_path = StorePath::try_from(path)
@@ -250,7 +243,7 @@ mod tests {
 
   #[test]
   fn test_name_and_version_parsing_derivation_without_version() {
-    let path = PathBuf::from(
+    let path = String::from(
       "/nix/store/0123456789abcdefghijklmnopqrstuv-unit-modprobe-.service.drv",
     );
     let store_path = StorePath::try_from(path)
@@ -269,13 +262,13 @@ mod tests {
       "/nix/store/0123456789abcdefghijklmnopqrstuv-foo/bin/foo",
       "/nix/store",
     ] {
-      assert!(StorePath::try_from(PathBuf::from(path)).is_err(), "{path}");
+      assert!(StorePath::try_from(String::from(path)).is_err(), "{path}");
     }
   }
 
   #[test]
   fn test_name_and_version_parsing_no_version() {
-    let path = PathBuf::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo");
+    let path = String::from("/nix/store/0123456789abcdefghijklmnopqrstuv-foo");
     let store_path = StorePath::try_from(path).unwrap();
     let (name, version) = store_path.name_and_version();
     assert_eq!(name, "foo");
@@ -294,7 +287,7 @@ mod tests {
       "/nix/store/0a1bxszp3c9rzphx8b6f5cb9ngbln6xj-unit-nix-daemon-.service",
     ];
     for p in paths {
-      let store_path = StorePath::try_from(PathBuf::from(p)).unwrap();
+      let store_path = StorePath::try_from(String::from(p)).unwrap();
       let (_name, _version) = store_path.name_and_version();
     }
   }

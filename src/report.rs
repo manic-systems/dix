@@ -277,13 +277,12 @@ pub fn diff_store_snapshots(
 
 #[cfg(test)]
 mod tests {
-  use std::path::PathBuf;
 
   use super::*;
   use crate::StorePath;
 
   fn store_path_with_hash(hash: &str, name: &str) -> StorePath {
-    StorePath::try_from(PathBuf::from(format!("/nix/store/{hash}-{name}")))
+    StorePath::try_from(format!("/nix/store/{hash}-{name}"))
       .unwrap_or_else(|err| panic!("failed to create test store path: {err}"))
   }
 

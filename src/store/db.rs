@@ -1,9 +1,6 @@
-use std::{
-  fmt::{
-    self,
-    Display,
-  },
-  path::PathBuf,
+use std::fmt::{
+  self,
+  Display,
 };
 
 use misstep::{
@@ -128,7 +125,7 @@ fn query_store_paths(
 
   let mut paths = Vec::new();
   for row in rows {
-    paths.push(StorePath::try_from(PathBuf::from(row?))?);
+    paths.push(StorePath::try_from(row?)?);
   }
 
   Ok(paths)
@@ -147,7 +144,7 @@ fn query_store_path_info(
   for row in rows {
     let (path, nar_size) = row?;
     infos.push(StorePathInfo {
-      path:     StorePath::try_from(PathBuf::from(path))?,
+      path:     StorePath::try_from(path)?,
       nar_size: Size::from_bytes(nar_size),
     });
   }
