@@ -5,8 +5,8 @@ edition      = "2024"
 rust-version = "1.97.0"
 description  = "Diff Nix"
 readme       = "README.md"
-homepage     = "https://github.com/faukah/dix"
-repository   = "https://github.com/faukah/dix"
+homepage     = "https://github.com/manic-systems/dix"
+repository   = "https://github.com/manic-systems/dix"
 license      = "GPL-3.0-only"
 keywords     = [ "nix", "nixos" ]
 categories   = [ "command-line-utilities" ]
@@ -30,9 +30,9 @@ optional         = true
 version          = "0.3"
 
 [features]
+cli     = [ "dep:pound", "dep:tracing-subscriber", "store" ]
 default = [ "cli", "store" ]
-cli = [ "dep:pound", "dep:tracing-subscriber", "store" ]
-store = [ "dep:rusqlite" ]
+store   = [ "dep:rusqlite" ]
 
 [[bin]]
 name              = "dix"
