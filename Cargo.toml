@@ -21,7 +21,7 @@ serde              = { features = [ "derive" ], version = "1.0.228" }
 serde_json         = "1.0.149"
 size               = "0.6.0"
 tracing            = { default-features = false, features = [ "std" ], version = "0.1" }
-tracing-subscriber = { features = [ "env-filter" ], version = "0.3" }
+tracing-subscriber = { default-features = false, features = [ "ansi" ], version = "0.3" }
 yansi              = { features = [ "detect-env", "detect-tty" ], version = "1.0.1" }
 
 [dev-dependencies]
