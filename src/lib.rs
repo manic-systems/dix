@@ -43,8 +43,7 @@ pub use snapshot::{
 /// The size type used in reports and snapshots, re-exported so users do
 /// not need to depend on a matching version of the `size` crate.
 pub use size::Size;
-#[cfg(feature = "store")]
-pub use store::query_snapshot_document;
+#[cfg(feature = "store")] pub use store::Store;
 
 /// A validated store path of the form `/nix/store/<hash>-<name>`.
 ///

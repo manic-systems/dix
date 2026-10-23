@@ -64,32 +64,53 @@ pub fn query_store_snapshot_with_backend(
   Ok(StoreSnapshot { closure, selected })
 }
 
-/// Canonicalizes `path` and queries a
-/// [`SnapshotDocument`](crate::SnapshotDocument) for it.
+/// A handle to the local Nix store.
 ///
-/// # Returns
-///
-/// A snapshot of the store path that `path` resolves to.
-///
-/// # Errors
-///
-/// Returns an error if the path cannot be canonicalized, does not resolve to
-/// a store path, or the store queries fail.
-pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
-  let canonical = path.canonicalize().with_context(|| {
-    format!("failed to canonicalize path '{}'", path.display())
-  })?;
-  let store_path = canonical
-    .into_os_string()
-    .into_string()
-    .map_err(|path| report!("path '{}' is not valid unicode", path.display()))
-    .and_then(StorePath::try_from)?;
-  let snapshot = STORE
-    .with(|store| query_store_snapshot_with_backend(store, &store_path))?;
-  Ok(SnapshotDocument {
-    path: store_path,
-    snapshot,
-  })
+/// It queries the Nix database, and falls back to Nix commands if the database
+/// cannot be opened or queried. Reuse one handle for several queries, so the
+/// database is opened only once.
+pub struct Store(CombinedStoreBackend);
+
+impl Store {
+  /// Opens the local Nix store.
+  ///
+  /// The database is never opened with `?immutable=1`, since that can silently
+  /// produce wrong results while Nix writes to it. If it cannot be opened, a
+  /// warning is logged and queries use Nix commands.
+  #[must_use]
+  pub fn open() -> Self {
+    Self(CombinedStoreBackend::open())
+  }
+
+  /// Canonicalizes `path` and queries a
+  /// [`SnapshotDocument`](crate::SnapshotDocument) for it.
+  ///
+  /// # Returns
+  ///
+  /// A snapshot of the store path that `path` resolves to.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the path cannot be canonicalized, does not resolve to
+  /// a store path, or the store queries fail.
+  pub fn query_snapshot_document(
+    &self,
+    path: &Path,
+  ) -> Result<SnapshotDocument> {
+    let canonical = path.canonicalize().with_context(|| {
+      format!("failed to canonicalize path '{}'", path.display())
+    })?;
+    let store_path = canonical
+      .into_os_string()
+      .into_string()
+      .map_err(|path| report!("path '{}' is not valid unicode", path.display()))
+      .and_then(StorePath::try_from)?;
+    let snapshot = query_store_snapshot_with_backend(&self.0, &store_path)?;
+    Ok(SnapshotDocument {
+      path: store_path,
+      snapshot,
+    })
+  }
 }
 
 /// Defines an interface for interacting with a Nix database.
@@ -118,12 +139,6 @@ pub trait StoreBackend: Display {
   ) -> Result<Vec<StorePathInfo>>;
 }
 
-thread_local! {
-  /// The backend shared by all store queries on this thread, so the Nix
-  /// database is opened, and a failure to open it reported, only once.
-  pub static STORE: CombinedStoreBackend = CombinedStoreBackend::open();
-}
-
 /// combines multiple store backends by falling back to the next one if the
 /// current one fails.
 ///
@@ -140,9 +155,6 @@ impl CombinedStoreBackend {
   }
 
   /// Tries the sqlite database first, then falls back to Nix commands.
-  ///
-  /// The database is never opened with `?immutable=1`, since that can silently
-  /// produce wrong results while Nix writes to it.
   fn open() -> Self {
     let mut backends: Vec<Box<dyn StoreBackend>> = Vec::new();
     match DbConnection::open(DATABASE_PATH) {
