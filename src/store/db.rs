@@ -7,7 +7,6 @@ use std::{
 };
 
 use misstep::{
-  OptionExt as _,
   Result,
   ResultExt as _,
 };
@@ -119,25 +118,13 @@ fn open_connection(path: &str) -> Result<Connection> {
   Ok(inner)
 }
 
-/// Converts `path` to the string form the Nix database stores paths in.
-///
-/// # Errors
-///
-/// Returns an error if `path` is not valid unicode.
-fn path_str(path: &StorePath) -> Result<&str> {
-  path.to_str().with_context(|| {
-    format!("store path '{}' is not valid unicode", path.display())
-  })
-}
-
 fn query_store_paths(
   conn: &Connection,
   query: &str,
   path: &StorePath,
 ) -> Result<Vec<StorePath>> {
   let mut query = conn.prepare_cached(query)?;
-  let rows =
-    query.query_map([path_str(path)?], |row| row.get::<_, String>(0))?;
+  let rows = query.query_map([path.as_str()], |row| row.get::<_, String>(0))?;
 
   let mut paths = Vec::new();
   for row in rows {
@@ -152,7 +139,7 @@ fn query_store_path_info(
   path: &StorePath,
 ) -> Result<Vec<StorePathInfo>> {
   let mut query = conn.prepare_cached(queries::QUERY_CLOSURE_PATH_INFO)?;
-  let rows = query.query_map([path_str(path)?], |row| {
+  let rows = query.query_map([path.as_str()], |row| {
     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
   })?;
 
