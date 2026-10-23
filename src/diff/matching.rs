@@ -409,7 +409,7 @@ mod tests {
     let costs = vec![vec![10, 1, 9], vec![8, 7, 2]];
 
     assert_eq!(ordered_matching(&costs), vec![(0, 1), (1, 2)]);
-    assert!(ordered_matching(&[]).is_empty());
+    assert_eq!(ordered_matching(&[]).len(), 0);
   }
 
   #[test]
@@ -475,7 +475,7 @@ mod tests {
     assert!(matches!(result[0], EitherOrBoth::Left(_)));
 
     let result = match_version_amounts(empty, empty);
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 0);
   }
 
   #[test]

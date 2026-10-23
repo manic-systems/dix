@@ -479,7 +479,7 @@ mod tests {
 
     let conn = DbConnection::open(&db_path).unwrap();
     let derivations = conn.query_system_derivations(&system).unwrap();
-    assert!(!derivations.is_empty());
+    assert_ne!(derivations.len(), 0);
   }
 
   #[test]
