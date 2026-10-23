@@ -65,9 +65,10 @@ This is a changelog of the `dix` repository. It follows the
   are still exported from the crate root.
 - **Breaking:** `StorePathInfo` exposes public `path` and `nar_size` fields
   instead of `new`, `path()` and `nar_size()`.
-- **Breaking:** `StorePath::try_from` only accepts paths of the form
-  `/nix/store/<hash>-<name>`, so it rejects paths inside a store path, and
-  `StorePath` dereferences to `Path` instead of `PathBuf`.
+- **Breaking:** `StorePath` is created with `TryFrom<String>` instead of
+  `TryFrom<PathBuf>`, only accepts paths of the form `/nix/store/<hash>-<name>`
+  and dereferences to `Path` instead of `PathBuf`. `StorePath::as_str` returns
+  it as a string.
 - **Breaking:** `json::display_diff` is replaced by `json::JsonReport`, which
   serializes an already queried report instead of querying and printing it.
 - **Breaking:** `DiffReport`, `PathStats` and `PackageSizeDelta` expose public

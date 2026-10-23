@@ -4,6 +4,7 @@ use misstep::{
   Result,
   ResultExt as _,
   bail,
+  report,
 };
 use serde::{
   Deserialize,
@@ -147,7 +148,11 @@ pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
   let canonical = path.canonicalize().with_context(|| {
     format!("failed to canonicalize path '{}'", path.display())
   })?;
-  let store_path = StorePath::try_from(canonical)?;
+  let store_path = canonical
+    .into_os_string()
+    .into_string()
+    .map_err(|path| report!("path '{}' is not valid unicode", path.display()))
+    .and_then(StorePath::try_from)?;
   let snapshot = STORE
     .with(|store| query_store_snapshot_with_backend(store, &store_path))?;
   Ok(SnapshotDocument {
@@ -158,15 +163,13 @@ pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
 
 #[cfg(test)]
 mod tests {
-  use std::path::PathBuf;
 
   use size::Size;
 
   use super::*;
 
   fn store_path(hash: u8, name: &str) -> StorePath {
-    StorePath::try_from(PathBuf::from(format!("/nix/store/{hash:0>32}-{name}")))
-      .unwrap()
+    StorePath::try_from(format!("/nix/store/{hash:0>32}-{name}")).unwrap()
   }
 
   fn document() -> SnapshotDocument {

@@ -360,7 +360,7 @@ mod tests {
   use crate::store::DbConnection;
 
   fn store_path(fixture: &str) -> StorePath {
-    StorePath::try_from(PathBuf::from(fixture)).unwrap()
+    StorePath::try_from(fixture.to_owned()).unwrap()
   }
 
   #[test]

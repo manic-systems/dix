@@ -3,7 +3,6 @@ use std::{
     self,
     Display,
   },
-  path::PathBuf,
   process::Command,
 };
 
@@ -77,7 +76,7 @@ fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
   output
     .lines()
     .map(|line| {
-      StorePath::try_from(PathBuf::from(line)).with_context(|| {
+      StorePath::try_from(line.to_owned()).with_context(|| {
         format!("encountered invalid path in nix command output: {line}")
       })
     })
@@ -107,7 +106,7 @@ fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
       .context("failed to parse NAR size from nix path-info output")?;
 
     infos.push(StorePathInfo {
-      path:     StorePath::try_from(PathBuf::from(path))?,
+      path:     StorePath::try_from(path.to_owned())?,
       nar_size: Size::from_bytes(bytes),
     });
   }
@@ -163,7 +162,7 @@ mod tests {
     paths.sort();
     let mut expected = FAKE_PATHS
       .lines()
-      .map(|path| StorePath::try_from(PathBuf::from(path)).unwrap())
+      .map(|path| StorePath::try_from(path.to_owned()).unwrap())
       .collect::<Vec<_>>();
     expected.sort();
 
