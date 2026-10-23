@@ -24,10 +24,7 @@ use dix::{
   SnapshotDocument,
   json,
 };
-use misstep::{
-  ResultExt as _,
-  report,
-};
+use misstep::ResultExt as _;
 use pound::{
   Parse,
   ValueEnum,
@@ -260,25 +257,14 @@ fn print_snapshot(path: &Path) -> misstep::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if a path does not exist, a snapshot is invalid, the store
-/// cannot be queried, or the output cannot be written.
+/// Returns an error if a path cannot be loaded as a store path or snapshot, or
+/// the output cannot be written.
 fn print_diff(
   old_path: &Path,
   new_path: &Path,
   output: OutputFormat,
   options: RenderOptions,
 ) -> misstep::Result<()> {
-  for (name, path) in [("old", old_path), ("new", new_path)] {
-    if !path.exists() {
-      return Err(report!(
-        "{name} profile path does not exist: {}",
-        path.display()
-      ));
-    }
-  }
-
-  tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
-
   let old = load_snapshot(old_path)?;
   let new = load_snapshot(new_path)?;
   let report = dix::diff_store_snapshots(&old.snapshot, &new.snapshot);
