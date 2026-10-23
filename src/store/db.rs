@@ -146,10 +146,10 @@ fn query_store_path_info(
   let mut infos = Vec::new();
   for row in rows {
     let (path, nar_size) = row?;
-    infos.push(StorePathInfo::new(
-      StorePath::try_from(PathBuf::from(path))?,
-      Size::from_bytes(nar_size),
-    ));
+    infos.push(StorePathInfo {
+      path:     StorePath::try_from(PathBuf::from(path))?,
+      nar_size: Size::from_bytes(nar_size),
+    });
   }
 
   Ok(infos)

@@ -34,9 +34,9 @@ pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorePathInfo {
-  path:     StorePath,
+  pub path:     StorePath,
   #[serde(with = "size_bytes")]
-  nar_size: Size,
+  pub nar_size: Size,
 }
 
 /// (De)serializes a [`Size`] as a plain byte count.
@@ -81,23 +81,6 @@ mod size_bytes {
     deserializer: D,
   ) -> Result<Size, D::Error> {
     i64::deserialize(deserializer).map(Size::from_bytes)
-  }
-}
-
-impl StorePathInfo {
-  #[must_use]
-  pub const fn new(path: StorePath, nar_size: Size) -> Self {
-    Self { path, nar_size }
-  }
-
-  #[must_use]
-  pub const fn path(&self) -> &StorePath {
-    &self.path
-  }
-
-  #[must_use]
-  pub const fn nar_size(&self) -> Size {
-    self.nar_size
   }
 }
 
@@ -247,13 +230,13 @@ mod test {
       if self.fail_query {
         Err(report!("Query failed"))
       } else {
-        Ok(vec![StorePathInfo::new(
-          StorePath::try_from(
+        Ok(vec![StorePathInfo {
+          path:     StorePath::try_from(
             Path::new("/nix/store/0123456789abcdefghijklmnopqrstuv-dummy")
               .to_path_buf(),
           )?,
-          Size::from_bytes(100),
-        )])
+          nar_size: Size::from_bytes(100),
+        }])
       }
     }
   }

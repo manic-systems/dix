@@ -160,8 +160,14 @@ mod tests {
     let bash = store_path(2, "bash-5.2.15");
     SnapshotDocument::new(system.clone(), StoreSnapshot {
       closure:  vec![
-        StorePathInfo::new(system, Size::from_bytes(1)),
-        StorePathInfo::new(bash.clone(), Size::from_bytes(5_000_000)),
+        StorePathInfo {
+          path:     system,
+          nar_size: Size::from_bytes(1),
+        },
+        StorePathInfo {
+          path:     bash.clone(),
+          nar_size: Size::from_bytes(5_000_000),
+        },
       ],
       selected: vec![bash],
     })
