@@ -33,6 +33,9 @@ This is a changelog of the `dix` repository. It follows the
 
 ### Fixed
 
+- Versions with a suffix other than a pre-release marker (`alpha`, `beta`,
+  `pre`, `rc`) now sort above their base version, so updating from `7.1.0` to
+  `7.1.0-unstable-2026-01-25` is an upgrade instead of a downgrade.
 - Querying a path that is not a valid store path, e.g. one that exists on disk
   but was never registered, now fails instead of producing an empty closure.
 
