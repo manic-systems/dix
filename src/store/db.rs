@@ -3,13 +3,11 @@ use std::{
     self,
     Display,
   },
-  path::{
-    Path,
-    PathBuf,
-  },
+  path::PathBuf,
 };
 
 use misstep::{
+  OptionExt as _,
   Result,
   ResultExt as _,
 };
@@ -21,7 +19,6 @@ use size::Size;
 
 use crate::{
   StorePath,
-  path_to_canonical_string,
   store::{
     StoreBackend,
     StorePathInfo,
@@ -55,11 +52,17 @@ impl DbConnection {
 }
 
 impl StoreBackend for DbConnection {
-  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
+  fn query_system_derivations(
+    &self,
+    system: &StorePath,
+  ) -> Result<Vec<StorePath>> {
     query_store_paths(&self.conn, queries::QUERY_SYSTEM_DERIVATIONS, system)
   }
 
-  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
+  fn query_closure_path_info(
+    &self,
+    path: &StorePath,
+  ) -> Result<Vec<StorePathInfo>> {
     query_store_path_info(&self.conn, path)
   }
 }
@@ -116,14 +119,25 @@ fn open_connection(path: &str) -> Result<Connection> {
   Ok(inner)
 }
 
+/// Converts `path` to the string form the Nix database stores paths in.
+///
+/// # Errors
+///
+/// Returns an error if `path` is not valid unicode.
+fn path_str(path: &StorePath) -> Result<&str> {
+  path.to_str().with_context(|| {
+    format!("store path '{}' is not valid unicode", path.display())
+  })
+}
+
 fn query_store_paths(
   conn: &Connection,
   query: &str,
-  path: &Path,
+  path: &StorePath,
 ) -> Result<Vec<StorePath>> {
-  let path = path_to_canonical_string(path)?;
   let mut query = conn.prepare_cached(query)?;
-  let rows = query.query_map([path], |row| row.get::<_, String>(0))?;
+  let rows =
+    query.query_map([path_str(path)?], |row| row.get::<_, String>(0))?;
 
   let mut paths = Vec::new();
   for row in rows {
@@ -135,11 +149,10 @@ fn query_store_paths(
 
 fn query_store_path_info(
   conn: &Connection,
-  path: &Path,
+  path: &StorePath,
 ) -> Result<Vec<StorePathInfo>> {
-  let path = path_to_canonical_string(path)?;
   let mut query = conn.prepare_cached(queries::QUERY_CLOSURE_PATH_INFO)?;
-  let rows = query.query_map([path], |row| {
+  let rows = query.query_map([path_str(path)?], |row| {
     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
   })?;
 

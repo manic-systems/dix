@@ -38,7 +38,7 @@ pub struct StoreSnapshot {
 /// a valid store path.
 pub fn query_store_snapshot_with_backend(
   backend: &dyn StoreBackend,
-  path: &Path,
+  path: &StorePath,
 ) -> Result<StoreSnapshot> {
   tracing::debug!(path = %path.display(), "querying closure path info");
   let closure = backend.query_closure_path_info(path).with_context(|| {

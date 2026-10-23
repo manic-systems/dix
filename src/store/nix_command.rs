@@ -3,10 +3,7 @@ use std::{
     self,
     Display,
   },
-  path::{
-    Path,
-    PathBuf,
-  },
+  path::PathBuf,
   process::Command,
 };
 
@@ -119,7 +116,10 @@ fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
 }
 
 impl StoreBackend for CommandBackend {
-  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
+  fn query_system_derivations(
+    &self,
+    system: &StorePath,
+  ) -> Result<Vec<StorePath>> {
     parse_store_path_output(&run(
       Command::new("nix-store")
         .args(["--query", "--references"])
@@ -127,11 +127,14 @@ impl StoreBackend for CommandBackend {
     )?)
   }
 
-  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
+  fn query_closure_path_info(
+    &self,
+    path: &StorePath,
+  ) -> Result<Vec<StorePathInfo>> {
     parse_path_info_size_output(&run(
       Command::new("nix")
         .args(["path-info", "--recursive", "--size"])
-        .arg(path),
+        .arg(path.as_os_str()),
     )?)
   }
 }
