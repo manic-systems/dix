@@ -101,7 +101,7 @@ impl PackageSizeDelta {
   }
 
   #[must_use]
-  pub fn is_significant(self) -> bool {
+  pub(crate) fn is_significant(self) -> bool {
     self.delta().bytes().abs() > PACKAGE_SIZE_DELTA_SIGNIFICANCE_THRESHOLD_BYTES
   }
 
