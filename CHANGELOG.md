@@ -39,8 +39,7 @@ This is a changelog of the `dix` repository. It follows the
   `diff`.
 - **Breaking:** Removed `--force-correctness`; its behaviour is now the only
   one. dix never opens the Nix database with `?immutable=1`, and falls back
-  to Nix commands instead. This drops the `force_correctness` parameter from
-  `query_diff_report`, `query_store_snapshot` and `json::display_diff`.
+  to Nix commands instead.
 - **Breaking:** The `store` module is now private, so `StoreBackend`,
   `CombinedStoreBackend`, `DbConnection`, `CommandBackend` and
   `query_store_snapshot_with_backend` are no longer public. `StorePathInfo` is
