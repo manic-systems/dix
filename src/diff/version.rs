@@ -57,7 +57,9 @@ impl Version {
       if self_comp.is_git_hash_pair(other_comp) {
         ComparedVersionComponents::Unordered
       } else {
-        ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
+        ComparedVersionComponents::Ordered(
+          self_comp.cmp_within_rank(other_comp),
+        )
       }
     }) {
       ComparedVersionComponents::Ordered(ordering) => {
@@ -190,7 +192,9 @@ impl Ord for Version {
   fn cmp(&self, other: &Self) -> cmp::Ordering {
     let component_ordering =
       match self.compare_components_with(other, |self_comp, other_comp| {
-        ComparedVersionComponents::Ordered(self_comp.cmp(&other_comp))
+        ComparedVersionComponents::Ordered(
+          self_comp.cmp_within_rank(other_comp),
+        )
       }) {
         ComparedVersionComponents::Ordered(ordering) => ordering,
         ComparedVersionComponents::Equal
@@ -290,6 +294,16 @@ impl VersionComponent<'_> {
     self.is_numeric().then(|| self.0.parse().ok()).flatten()
   }
 
+  /// Compares two components of the same [`ComponentRank`]: numbers by value,
+  /// and text alphabetically. Whether numbers or text sort first is decided by
+  /// the rank, which depends on the component's position.
+  fn cmp_within_rank(self, other: Self) -> cmp::Ordering {
+    match (self.as_u64(), other.as_u64()) {
+      (Some(a), Some(b)) => a.cmp(&b),
+      _ => self.0.cmp(other.0),
+    }
+  }
+
   /// Whether the component marks a pre-release, ignoring case.
   fn is_pre_release(&self) -> bool {
     PRE_RELEASE_MARKERS.iter().any(|marker| {
@@ -329,28 +343,6 @@ fn has_ascii_hex_letter(component: &str) -> bool {
     .any(|b| matches!(b, b'a'..=b'f' | b'A'..=b'F'))
 }
 
-impl PartialOrd for VersionComponent<'_> {
-  fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-    Some(self.cmp(other))
-  }
-}
-
-impl Ord for VersionComponent<'_> {
-  fn cmp(&self, other: &Self) -> cmp::Ordering {
-    match (self.is_numeric(), other.is_numeric()) {
-      (true, true) => {
-        match (self.as_u64(), other.as_u64()) {
-          (Some(a), Some(b)) => a.cmp(&b),
-          _ => self.0.cmp(other.0),
-        }
-      },
-      (false, false) => self.0.cmp(other.0),
-      (true, false) => cmp::Ordering::Less,
-      (false, true) => cmp::Ordering::Greater,
-    }
-  }
-}
-
 impl fmt::Display for Version {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.write_str(&self.name)
@@ -359,6 +351,8 @@ impl fmt::Display for Version {
 
 #[cfg(test)]
 mod tests {
+  use std::cmp::Ordering;
+
   use proptest::proptest;
 
   use super::{
@@ -401,7 +395,7 @@ mod tests {
       let a = Version::new(a);
       let b = a.clone();
 
-      assert_eq!(a.cmp(&a), std::cmp::Ordering::Equal);
+      assert_eq!(a.cmp(&a), Ordering::Equal);
       assert_eq!(a, b);
     }
 
@@ -414,7 +408,7 @@ mod tests {
       let b = Version::new(b);
 
       assert_eq!(a.cmp(&b), b.cmp(&a).reverse());
-      if a.cmp(&b) == std::cmp::Ordering::Equal {
+      if a.cmp(&b) == Ordering::Equal {
         assert_eq!(a, b);
       }
     }
@@ -458,7 +452,7 @@ mod tests {
     versions.insert(hyphenated.clone());
 
     assert_ne!(dotted, hyphenated);
-    assert_ne!(dotted.cmp(&hyphenated), std::cmp::Ordering::Equal);
+    assert_ne!(dotted.cmp(&hyphenated), Ordering::Equal);
     assert_eq!(versions.len(), 2);
   }
 
@@ -469,9 +463,9 @@ mod tests {
 
     assert_eq!(
       dotted.change_ordering(&hyphenated),
-      VersionChangeOrdering::Ordered(std::cmp::Ordering::Equal),
+      VersionChangeOrdering::Ordered(Ordering::Equal),
     );
-    assert_ne!(dotted.cmp(&hyphenated), std::cmp::Ordering::Equal);
+    assert_ne!(dotted.cmp(&hyphenated), Ordering::Equal);
   }
 
   #[test]
@@ -524,11 +518,11 @@ mod tests {
 
     assert_eq!(
       old.change_ordering(&new),
-      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less),
+      VersionChangeOrdering::Ordered(Ordering::Less),
     );
     assert_eq!(
       new.change_ordering(&old),
-      VersionChangeOrdering::Ordered(std::cmp::Ordering::Greater),
+      VersionChangeOrdering::Ordered(Ordering::Greater),
     );
   }
 
@@ -539,7 +533,7 @@ mod tests {
 
     assert_eq!(
       old.change_ordering(&new),
-      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less),
+      VersionChangeOrdering::Ordered(Ordering::Less),
     );
   }
 
@@ -591,28 +585,21 @@ mod tests {
 
   #[test]
   fn component_comparison_numeric() {
-    assert!(VersionComponent("10") > VersionComponent("2"));
-    assert!(VersionComponent("2") < VersionComponent("10"));
-    assert_eq!(VersionComponent("5"), VersionComponent("5"));
+    let compare =
+      |a, b| VersionComponent(a).cmp_within_rank(VersionComponent(b));
+    assert_eq!(compare("10", "2"), Ordering::Greater);
+    assert_eq!(compare("2", "10"), Ordering::Less);
+    assert_eq!(compare("5", "5"), Ordering::Equal);
   }
 
   #[test]
   fn component_comparison_text() {
-    assert!(VersionComponent("beta") > VersionComponent("alpha"));
-    assert!(VersionComponent("rc") > VersionComponent("beta"));
-    assert_eq!(VersionComponent("stable"), VersionComponent("stable"));
-  }
-
-  #[test]
-  fn component_comparison_mixed_types() {
-    assert!(VersionComponent("2") < VersionComponent("alpha"));
-    assert!(VersionComponent("alpha") > VersionComponent("2"));
-  }
-
-  #[test]
-  fn component_comparison_mixed_alphanumeric() {
-    assert_eq!(VersionComponent("2test234"), VersionComponent("2test234"));
-    assert!(VersionComponent("abc123") > VersionComponent("123abc"));
+    let compare =
+      |a, b| VersionComponent(a).cmp_within_rank(VersionComponent(b));
+    assert_eq!(compare("beta", "alpha"), Ordering::Greater);
+    assert_eq!(compare("rc", "beta"), Ordering::Greater);
+    assert_eq!(compare("stable", "stable"), Ordering::Equal);
+    assert_eq!(compare("abc123", "123abc"), Ordering::Greater);
   }
 
   #[test]
@@ -642,7 +629,7 @@ mod tests {
     assert!(unstable > base);
     assert_eq!(
       base.change_ordering(&unstable),
-      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less)
+      VersionChangeOrdering::Ordered(Ordering::Less)
     );
   }
 
