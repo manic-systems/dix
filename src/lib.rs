@@ -1,13 +1,9 @@
-use std::path::{
-  Path,
-  PathBuf,
-};
+use std::path::PathBuf;
 
 use misstep::{
   OptionExt as _,
   Report,
   Result,
-  ResultExt as _,
   bail,
   report,
 };
@@ -84,13 +80,7 @@ impl TryFrom<PathBuf> for StorePath {
 
   fn try_from(path: PathBuf) -> Result<Self> {
     tracing::trace!(path = %path.display(), "validating store path");
-    if !(path.starts_with("/nix/store")
-      || cfg!(test) && path.starts_with("/tmp/")
-      || cfg!(test) && path.starts_with(std::env::temp_dir())
-      || cfg!(test)
-        && std::fs::canonicalize(std::env::temp_dir())
-          .is_ok_and(|dir| path.starts_with(dir)))
-    {
+    if !path.starts_with("/nix/store") {
       bail!(
         "path {path} must start with /nix/store",
         path = path.display()
@@ -169,38 +159,13 @@ fn is_version_suffix(suffix: &str) -> bool {
     || diff::is_git_hash(suffix)
 }
 
-fn path_to_canonical_string(path: &Path) -> Result<String> {
-  let path = path.canonicalize().with_context(|| {
-    format!(
-      "failed to canonicalize path '{path}'",
-      path = path.display(),
-    )
-  })?;
-
-  let path = path.into_os_string().into_string().map_err(|path| {
-    tracing::debug!("path contains invalid unicode characters");
-    report!(
-      "failed to convert path '{path}' to valid unicode",
-      path = path.display(),
-    )
-  })?;
-
-  Ok(path)
-}
-
 #[cfg(test)]
 mod tests {
-  use std::{
-    fs,
-    sync::OnceLock,
-  };
-
   use proptest::proptest;
-  use tempfile::TempDir;
 
   proptest! {
     #[test]
-    fn parses_valid_paths(s in r"((/nix/store/)|(/tmp/[A-Za-z0-9._+-]+/))[a-z0-9A-Z]{32}-[-A-Za-z0-9._+~]{1,64}") {
+    fn parses_valid_paths(s in r"/nix/store/[a-z0-9A-Z]{32}-[-A-Za-z0-9._+~]{1,64}") {
       let path = PathBuf::from(s);
       let store_path = StorePath::try_from(path)
         .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
@@ -222,16 +187,6 @@ mod tests {
   }
 
   #[test]
-  fn test_store_path_from_tmp_file() {
-    let path =
-      PathBuf::from("/tmp/test123/0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path = StorePath::try_from(path.clone())
-      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
-    let inner = store_path.0;
-    assert_eq!(inner, path);
-  }
-
-  #[test]
   fn test_invalid_store_path() {
     let path =
       PathBuf::from("/invalid/prefix/0123456789abcdefghijklmnopqrstuv-foo-1.0");
@@ -239,18 +194,6 @@ mod tests {
     assert!(store_path.is_err());
   }
 
-  #[test]
-  fn test_name_and_version_parsing_tmpfile() {
-    let path =
-      PathBuf::from("/tmp/test123/0123456789abcdefghijklmnopqrstuv-foo-1.0");
-    let store_path = StorePath::try_from(path)
-      .unwrap_or_else(|err| panic!("failed to create StorePath: {err}"));
-    let (name, version) = store_path
-      .parse_name_and_version()
-      .unwrap_or_else(|err| panic!("failed to parse name and version: {err}"));
-    assert_eq!(name, "foo");
-    assert_eq!(version, Some("1.0"));
-  }
   #[test]
   fn test_name_and_version_parsing_store_path() {
     let path =
@@ -370,26 +313,5 @@ mod tests {
       let store_path = StorePath::try_from(PathBuf::from(p)).unwrap();
       let (_name, _version) = store_path.parse_name_and_version().unwrap();
     }
-  }
-
-  /// returns a temporary directory path (or creates it)
-  fn get_temp_dir() -> &'static Path {
-    static TEMP_DIR: OnceLock<TempDir> = OnceLock::new();
-    TEMP_DIR
-      .get_or_init(|| {
-        TempDir::new().unwrap_or_else(|err| {
-          panic!("failed to create temporary directory: {err}")
-        })
-      })
-      .path()
-  }
-
-  #[test]
-  fn test_path_to_canonical_string_basic() {
-    let dir = get_temp_dir();
-    let path = dir.join("simple-basic-path");
-    fs::write(&path, "").unwrap();
-    let canonical = path_to_canonical_string(&path).unwrap();
-    assert_eq!(canonical, path.canonicalize().unwrap());
   }
 }

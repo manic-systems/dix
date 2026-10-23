@@ -1,22 +1,19 @@
-// Test utilities afixture_path) nd infrastructure for database testing.
+// Test utilities and infrastructure for database testing.
 //
 // This module provides utilities to create temporary SQLite databases
 // with the Nix store schema for testing purposes.
 
-use std::{
-  fs,
-  path::{
-    Path,
-    PathBuf,
-  },
-};
+use std::path::PathBuf;
 
 use misstep::Result;
 use rusqlite::Connection;
 use size::Size;
 use tempfile::TempDir;
 
-use crate::store::StoreBackend;
+use crate::{
+  StorePath,
+  store::StoreBackend,
+};
 
 /// Sums the NAR sizes of the closure of `path`.
 ///
@@ -27,7 +24,10 @@ use crate::store::StoreBackend;
 /// # Errors
 ///
 /// Returns an error if the closure cannot be queried.
-pub fn closure_size(backend: &dyn StoreBackend, path: &Path) -> Result<Size> {
+pub fn closure_size(
+  backend: &dyn StoreBackend,
+  path: &StorePath,
+) -> Result<Size> {
   Ok(Size::from_bytes(
     backend
       .query_closure_path_info(path)?
@@ -40,8 +40,9 @@ pub fn closure_size(backend: &dyn StoreBackend, path: &Path) -> Result<Size> {
 /// Test database builder for creating temporary `SQLite` databases
 /// with the Nix store schema.
 pub struct TestDbBuilder {
-  temp_dir: TempDir,
-  db_path:  PathBuf,
+  /// Keeps the directory holding the database alive.
+  _temp_dir: TempDir,
+  db_path:   PathBuf,
 }
 
 impl TestDbBuilder {
@@ -50,7 +51,10 @@ impl TestDbBuilder {
     let temp_dir = TempDir::new()?;
     let db_path = temp_dir.path().join("test.db");
 
-    let builder = Self { temp_dir, db_path };
+    let builder = Self {
+      _temp_dir: temp_dir,
+      db_path,
+    };
     builder.init_schema()?;
 
     Ok(builder)
@@ -59,20 +63,6 @@ impl TestDbBuilder {
   /// Returns the path to the database file.
   pub fn db_path(&self) -> &std::path::Path {
     &self.db_path
-  }
-
-  /// Returns the actual filesystem path for a given fixture path.
-  ///
-  /// Converts a path like `/nix/store/xxx-name` to a path under
-  /// `tempdir/nix/store/xxx-name` so that canonicalized paths will
-  /// contain `/nix/store/` in them.
-  pub fn resolve_fixture_path(&self, fixture_path: &str) -> PathBuf {
-    // All paths are created under tempdir/nix/store/
-    // so they canonicalize to paths containing /nix/store/
-    self
-      .temp_dir
-      .path()
-      .join(fixture_path.strip_prefix("/").unwrap_or(fixture_path))
   }
 
   /// Opens a read-write connection to the database.
@@ -112,33 +102,20 @@ impl TestDbBuilder {
 
   /// Retrieves the id using a path
   pub fn get_id(&self, path: &str) -> Option<i64> {
-    let fs_path = self.resolve_fixture_path(path);
-    let canonical_path = fs_path.canonicalize().ok()?;
-    let path_str = canonical_path.to_string_lossy();
     let conn = self.open().ok()?;
     let mut stmt = conn
       .prepare("SELECT id FROM ValidPaths WHERE path = ?1 LIMIT 1")
       .ok()?;
 
-    let id = stmt
-      .query_row([&path_str], |row| row.get::<_, i64>(0))
-      .ok()?;
+    let id = stmt.query_row([path], |row| row.get::<_, i64>(0)).ok()?;
     drop(stmt);
 
     let _ = conn.close().map_err(|(_, err)| err);
     Some(id)
   }
 
-  /// Adds a valid path to the database, creating the filesystem directory.
-  ///
-  /// Creates the directory under `tempdir/nix/store/` so that canonicalized
-  /// paths contain `/nix/store/`.
+  /// Adds a valid path to the database.
   pub fn add_valid_path(&self, path: &str, nar_size: i64) -> Result<i64> {
-    let fs_path = self.resolve_fixture_path(path);
-    fs::create_dir_all(&fs_path)?;
-    let canonical_path = fs_path.canonicalize()?;
-    let path_str = canonical_path.to_string_lossy();
-
     let conn = self.open()?;
     let mut stmt = conn.prepare(
       "INSERT INTO ValidPaths (path, hash, registrationTime, narSize) VALUES \
@@ -146,7 +123,7 @@ impl TestDbBuilder {
     )?;
 
     let id = stmt.query_row(
-      [&path_str, "test-hash", "1234567890", &nar_size.to_string()],
+      [path, "test-hash", "1234567890", &nar_size.to_string()],
       |row| row.get::<_, i64>(0),
     )?;
     drop(stmt);
@@ -382,6 +359,10 @@ mod tests {
   use super::*;
   use crate::store::DbConnection;
 
+  fn store_path(fixture: &str) -> StorePath {
+    StorePath::try_from(PathBuf::from(fixture)).unwrap()
+  }
+
   #[test]
   fn test_db_builder_creation() {
     let db = TestDbBuilder::new().unwrap();
@@ -418,7 +399,7 @@ mod tests {
     let db = create_simple_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let root_fixture = fixtures::store_path("root-package");
-    let root = db.resolve_fixture_path(&root_fixture);
+    let root = store_path(&root_fixture);
 
     let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &root).unwrap();
@@ -429,10 +410,7 @@ mod tests {
   fn test_snapshot_of_unregistered_path_fails() {
     let db = create_simple_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
-    // Exists on disk, but was never registered.
-    let unregistered =
-      db.resolve_fixture_path(&fixtures::store_path("unregistered-1.0"));
-    fs::create_dir_all(&unregistered).unwrap();
+    let unregistered = store_path(&fixtures::store_path("unregistered-1.0"));
 
     let conn = DbConnection::open(&db_path).unwrap();
     let error =
@@ -447,7 +425,7 @@ mod tests {
     let db = create_simple_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let root_fixture = fixtures::store_path("root-package");
-    let root = db.resolve_fixture_path(&root_fixture);
+    let root = store_path(&root_fixture);
 
     let conn = DbConnection::open(&db_path).unwrap();
     let info = conn.query_closure_path_info(&root).unwrap();
@@ -463,7 +441,7 @@ mod tests {
     let db = create_diamond_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let a_fixture = fixtures::store_path("package-a");
-    let a = db.resolve_fixture_path(&a_fixture);
+    let a = store_path(&a_fixture);
 
     let conn = DbConnection::open(&db_path).unwrap();
     let closure = conn.query_closure_path_info(&a).unwrap();
@@ -475,7 +453,7 @@ mod tests {
     let db = create_system_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let system_fixture = fixtures::system_path("nixos-25.11");
-    let system = db.resolve_fixture_path(&system_fixture);
+    let system = store_path(&system_fixture);
 
     let conn = DbConnection::open(&db_path).unwrap();
     let derivations = conn.query_system_derivations(&system).unwrap();
@@ -487,7 +465,7 @@ mod tests {
     let db = edge_cases::create_self_reference_test_db().unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
     let path_fixture = fixtures::store_path("self-referential");
-    let path = db.resolve_fixture_path(&path_fixture);
+    let path = store_path(&path_fixture);
 
     let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &path).unwrap();
@@ -501,9 +479,8 @@ mod tests {
 
     let conn = DbConnection::open(&db_path).unwrap();
     for letter in ["a", "b", "c"] {
-      let path = db.resolve_fixture_path(&fixtures::store_path(&format!(
-        "circular-{letter}"
-      )));
+      let path =
+        store_path(&fixtures::store_path(&format!("circular-{letter}")));
       let size = closure_size(&conn, &path).unwrap();
       assert_eq!(
         size,
@@ -517,7 +494,7 @@ mod tests {
   fn test_wide_tree() {
     let db = edge_cases::create_wide_tree_test_db(100).unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
-    let path = db.resolve_fixture_path(&fixtures::store_path("wide-root"));
+    let path = store_path(&fixtures::store_path("wide-root"));
 
     let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &path).unwrap();
@@ -531,7 +508,7 @@ mod tests {
   fn test_deep_chain() {
     let db = edge_cases::create_deep_chain_test_db(100).unwrap();
     let db_path = db.db_path().to_string_lossy().to_string();
-    let path = db.resolve_fixture_path(&fixtures::store_path("deep-0"));
+    let path = store_path(&fixtures::store_path("deep-0"));
 
     let conn = DbConnection::open(&db_path).unwrap();
     let size = closure_size(&conn, &path).unwrap();

@@ -8,10 +8,7 @@ mod queries;
 // Make the test db available for the rest of the crate.
 #[cfg(test)] pub mod test_utils;
 
-use std::{
-  fmt::Display,
-  path::Path,
-};
+use std::fmt::Display;
 
 pub use db::DbConnection;
 use misstep::{
@@ -94,14 +91,20 @@ pub trait StoreBackend: Display {
   /// # Errors
   ///
   /// Returns an error if the backend query fails.
-  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>>;
+  fn query_system_derivations(
+    &self,
+    system: &StorePath,
+  ) -> Result<Vec<StorePath>>;
   /// Queries all dependencies of a store path with their NAR sizes.
   ///
   /// # Errors
   ///
   /// Returns an error if the backend query fails or path information cannot be
   /// read.
-  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>>;
+  fn query_closure_path_info(
+    &self,
+    path: &StorePath,
+  ) -> Result<Vec<StorePathInfo>>;
 }
 
 thread_local! {
@@ -140,9 +143,9 @@ impl CombinedStoreBackend {
   }
 
   // tries to execute a query until it succeeds or all backends have been tried
-  fn fallback_query<F, Ret>(&self, query: F, path: &Path) -> Result<Ret>
+  fn fallback_query<F, Ret>(&self, query: F, path: &StorePath) -> Result<Ret>
   where
-    F: Fn(&dyn StoreBackend, &Path) -> Result<Ret>,
+    F: Fn(&dyn StoreBackend, &StorePath) -> Result<Ret>,
   {
     let mut combined_err: Option<misstep::Report> = None;
     // attempt to cycle through backends until a successful query is made
@@ -175,14 +178,20 @@ impl Display for CombinedStoreBackend {
 }
 
 impl StoreBackend for CombinedStoreBackend {
-  fn query_system_derivations(&self, system: &Path) -> Result<Vec<StorePath>> {
+  fn query_system_derivations(
+    &self,
+    system: &StorePath,
+  ) -> Result<Vec<StorePath>> {
     self.fallback_query(
       |backend, system| backend.query_system_derivations(system),
       system,
     )
   }
 
-  fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>> {
+  fn query_closure_path_info(
+    &self,
+    path: &StorePath,
+  ) -> Result<Vec<StorePathInfo>> {
     self.fallback_query(
       |backend, path| backend.query_closure_path_info(path),
       path,
@@ -192,9 +201,19 @@ impl StoreBackend for CombinedStoreBackend {
 
 #[cfg(test)]
 mod test {
-  use std::fmt;
+  use std::{
+    fmt,
+    path::PathBuf,
+  };
 
   use super::*;
+
+  fn dummy_path() -> StorePath {
+    StorePath::try_from(PathBuf::from(
+      "/nix/store/0123456789abcdefghijklmnopqrstuv-dummy",
+    ))
+    .unwrap()
+  }
 
   struct MockStoreBackend {
     name:       String,
@@ -219,7 +238,7 @@ mod test {
   impl StoreBackend for MockStoreBackend {
     fn query_system_derivations(
       &self,
-      _system: &Path,
+      _system: &StorePath,
     ) -> Result<Vec<StorePath>> {
       if self.fail_query {
         Err(report!("Query failed"))
@@ -230,16 +249,13 @@ mod test {
 
     fn query_closure_path_info(
       &self,
-      _path: &Path,
+      _path: &StorePath,
     ) -> Result<Vec<StorePathInfo>> {
       if self.fail_query {
         Err(report!("Query failed"))
       } else {
         Ok(vec![StorePathInfo {
-          path:     StorePath::try_from(
-            Path::new("/nix/store/0123456789abcdefghijklmnopqrstuv-dummy")
-              .to_path_buf(),
-          )?,
+          path:     dummy_path(),
           nar_size: Size::from_bytes(100),
         }])
       }
@@ -252,7 +268,7 @@ mod test {
     let f2 = Box::new(MockStoreBackend::new("f2", false));
     let combined = CombinedStoreBackend::new(vec![f1, f2]);
 
-    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
+    let res = test_utils::closure_size(&combined, &dummy_path());
     assert!(res.is_ok());
     assert_eq!(res.unwrap(), Size::from_bytes(100));
   }
@@ -263,7 +279,7 @@ mod test {
     let f2 = Box::new(MockStoreBackend::new("f2", false));
     let combined = CombinedStoreBackend::new(vec![f1, f2]);
 
-    let res = combined.query_system_derivations(Path::new("/dummy"));
+    let res = combined.query_system_derivations(&dummy_path());
     assert!(res.is_ok());
     assert_eq!(res.unwrap(), Vec::new());
   }
@@ -274,7 +290,7 @@ mod test {
     let f2 = Box::new(MockStoreBackend::new("f2", true));
     let combined = CombinedStoreBackend::new(vec![f1, f2]);
 
-    let res = test_utils::closure_size(&combined, Path::new("/dummy"));
+    let res = test_utils::closure_size(&combined, &dummy_path());
     assert!(res.is_err());
   }
 }
