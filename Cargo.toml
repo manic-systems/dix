@@ -14,7 +14,6 @@ include      = [ "CHANGELOG.md", "Cargo.lock", "Cargo.toml", "LICENSE.md", "READ
 
 [dependencies]
 diff               = "0.1.13"
-itertools          = "0.15.0"
 misstep            = { features = [ "color", "pretty" ], version = "0.4.1" }
 pound              = "0.5.1"
 rusqlite           = { default-features = false, features = [ "cache" ], version = "0.40.0" }

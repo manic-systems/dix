@@ -15,10 +15,6 @@ use std::{
 
 // The `diff` crate, not `crate::diff`.
 use ::diff as char_diff;
-use itertools::{
-  EitherOrBoth,
-  Itertools,
-};
 use size::Size;
 use yansi::{
   Paint as _,
@@ -170,11 +166,12 @@ fn render_diffs(
   let mut wrote_group = false;
   let mut hidden = 0;
 
-  for (group, group_diffs) in
-    &diffs.iter().chunk_by(|diff| status_group(diff.status()))
+  for group_diffs in
+    diffs.chunk_by(|a, b| status_group(a.status()) == status_group(b.status()))
   {
+    let group = status_group(group_diffs[0].status());
     let (shown, group_hidden): (Vec<&&PackageDiff>, Vec<_>) =
-      group_diffs.partition(|diff| options.shows(diff));
+      group_diffs.iter().partition(|diff| options.shows(diff));
     hidden += group_hidden.len();
 
     if shown.is_empty() {
@@ -523,18 +520,20 @@ fn fmt_single_version_diff(
     write_version_piece(new_acc, piece, |value| value.yellow())?;
   }
 
-  for pair in Itertools::zip_longest(old_diff.iter(), new_diff.iter()) {
+  let (mut old_pieces, mut new_pieces) = (old_diff.iter(), new_diff.iter());
+  loop {
     #[expect(clippy::redundant_closure_for_method_calls)]
-    match pair {
-      EitherOrBoth::Left(old) => {
+    match (old_pieces.next(), new_pieces.next()) {
+      (Some(old), None) => {
         write_version_piece(old_acc, old, |value| value.red())?;
       },
-      EitherOrBoth::Right(new) => {
+      (None, Some(new)) => {
         write_version_piece(new_acc, new, |value| value.green())?;
       },
-      EitherOrBoth::Both(old, new) => {
+      (Some(old), Some(new)) => {
         fmt_version_piece_pair(old_acc, new_acc, old, new)?;
       },
+      (None, None) => break,
     }
   }
 
