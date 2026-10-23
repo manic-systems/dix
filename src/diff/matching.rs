@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::diff::{
+  Version,
   VersionAmount,
   VersionDiff,
   version::VersionComponent,
@@ -131,7 +132,7 @@ fn version_components(
 ) -> Vec<Vec<VersionComponent<'_>>> {
   items
     .iter()
-    .map(|item| item.version.components().collect())
+    .map(|item| item.version.iter().flat_map(Version::components).collect())
     .collect()
 }
 
@@ -531,7 +532,8 @@ mod tests {
       matches!(
         result,
         VersionDiff::Changed { old, new }
-          if old.version.name == "2.0.0" && new.version.name == "2.0.0"
+          if old.version == Some(Version::new("2.0.0"))
+            && new.version == Some(Version::new("2.0.0"))
       )
     }));
   }

@@ -81,11 +81,11 @@ impl PackageVersions {
 
 #[derive(Default)]
 struct VersionAmounts {
-  amounts: BTreeMap<Version, NonZeroUsize>,
+  amounts: BTreeMap<Option<Version>, NonZeroUsize>,
 }
 
 impl VersionAmounts {
-  fn add(&mut self, version: Version) {
+  fn add(&mut self, version: Option<Version>) {
     self
       .amounts
       .entry(version)
@@ -97,15 +97,7 @@ impl VersionAmounts {
     self.amounts.is_empty()
   }
 
-  fn get(&self, version: &Version) -> Option<NonZeroUsize> {
-    self.amounts.get(version).copied()
-  }
-
-  fn contains(&self, version: &Version) -> bool {
-    self.amounts.contains_key(version)
-  }
-
-  fn iter(&self) -> impl Iterator<Item = (&Version, NonZeroUsize)> {
+  fn iter(&self) -> impl Iterator<Item = (&Option<Version>, NonZeroUsize)> {
     self
       .amounts
       .iter()
@@ -146,7 +138,7 @@ fn version_change(versions: &PackageVersions) -> Option<VersionChange> {
   let mut has_omitted_versions = false;
 
   for (version, old_amount) in versions.old.iter() {
-    match versions.new.get(version) {
+    match versions.new.amounts.get(version).copied() {
       Some(new_amount) if old_amount == new_amount => {
         has_omitted_versions = true;
       },
@@ -157,13 +149,21 @@ fn version_change(versions: &PackageVersions) -> Option<VersionChange> {
           new_amount,
         });
       },
-      None => old_only.push(VersionAmount::new(version.clone(), old_amount)),
+      None => {
+        old_only.push(VersionAmount {
+          version: version.clone(),
+          amount:  old_amount,
+        });
+      },
     }
   }
 
   for (version, new_amount) in versions.new.iter() {
-    if !versions.old.contains(version) {
-      new_only.push(VersionAmount::new(version.clone(), new_amount));
+    if !versions.old.amounts.contains_key(version) {
+      new_only.push(VersionAmount {
+        version: version.clone(),
+        amount:  new_amount,
+      });
     }
   }
 
@@ -198,7 +198,11 @@ fn change_status(version_diffs: &[VersionDiff]) -> DiffStatus {
       VersionDiff::Removed(_) => saw_downgrade = true,
       VersionDiff::Added(_) => saw_upgrade = true,
       VersionDiff::Changed { old, new } => {
-        match old.version.change_ordering(&new.version) {
+        let ordering = match (&old.version, &new.version) {
+          (Some(old), Some(new)) => old.change_ordering(new),
+          _ => VersionChangeOrdering::Unordered,
+        };
+        match ordering {
           VersionChangeOrdering::Ordered(cmp::Ordering::Less) => {
             saw_upgrade = true;
           },
@@ -245,10 +249,10 @@ mod tests {
   fn package_versions(old: &[&str], new: &[&str]) -> PackageVersions {
     let mut versions = PackageVersions::default();
     for version in old {
-      versions.old.add(Version::new(*version));
+      versions.old.add(Some(Version::new(*version)));
     }
     for version in new {
-      versions.new.add(Version::new(*version));
+      versions.new.add(Some(Version::new(*version)));
     }
     versions
   }
@@ -372,7 +376,7 @@ mod tests {
     assert_eq!(diff.status, DiffStatus::Changed);
     assert!(!diff.has_omitted_versions);
     assert_eq!(diff.versions, vec![VersionDiff::AmountChanged {
-      version:    Version::new("1.0.0"),
+      version:    Some(Version::new("1.0.0")),
       old_amount: nonzero(1),
       new_amount: nonzero(2),
     }]);
@@ -465,10 +469,10 @@ mod tests {
       .collect();
     let mut versions = PackageVersions::default();
     for version in old_versions {
-      versions.old.add(version);
+      versions.old.add(Some(version));
     }
     for version in new_versions {
-      versions.new.add(version);
+      versions.new.add(Some(version));
     }
     let mut packages = BTreeMap::new();
     packages.insert("large-pkg".to_owned(), versions);

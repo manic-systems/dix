@@ -94,27 +94,32 @@ impl<'a> From<&'a PackageDiff> for JsonDiff<'a> {
 
 #[derive(Serialize)]
 struct JsonVersion<'a> {
-  name: &'a str,
+  /// `null` for packages without a version.
+  name: Option<&'a str>,
 }
 
-impl<'a> From<&'a Version> for JsonVersion<'a> {
-  fn from(version: &'a Version) -> Self {
+impl<'a> From<Option<&'a Version>> for JsonVersion<'a> {
+  fn from(version: Option<&'a Version>) -> Self {
     Self {
-      name: version.name.as_str(),
+      name: version.map(|version| version.name.as_str()),
     }
   }
 }
 
 #[derive(Serialize)]
 struct JsonVersionAmount<'a> {
-  name:   &'a str,
+  /// `null` for packages without a version.
+  name:   Option<&'a str>,
   amount: usize,
 }
 
 impl<'a> From<&'a VersionAmount> for JsonVersionAmount<'a> {
   fn from(version: &'a VersionAmount) -> Self {
     Self {
-      name:   version.version.name.as_str(),
+      name:   version
+        .version
+        .as_ref()
+        .map(|version| version.name.as_str()),
       amount: version.amount.get(),
     }
   }
@@ -165,7 +170,7 @@ impl<'a> From<&'a VersionDiff> for JsonVersionDiff<'a> {
         new_amount,
       } => {
         Self::AmountChanged {
-          version:    JsonVersion::from(version),
+          version:    JsonVersion::from(version.as_ref()),
           old_amount: old_amount.get(),
           new_amount: new_amount.get(),
         }
@@ -208,7 +213,7 @@ mod tests {
               new: VersionAmount::new("25.12-system-path", amount(1)),
             },
             VersionDiff::AmountChanged {
-              version:    Version::new("25.12-system"),
+              version:    Some(Version::new("25.12-system")),
               old_amount: amount(1),
               new_amount: amount(2),
             },

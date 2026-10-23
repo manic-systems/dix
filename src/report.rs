@@ -8,6 +8,7 @@ use size::Size;
 
 use crate::{
   DiffStatus,
+  Version,
   VersionDiff,
   diff::{
     Package,
@@ -232,7 +233,10 @@ impl SnapshotPackages {
     for info in &snapshot.closure {
       let (name, version) = info.path.name_and_version();
       add_package_size(&mut sizes, name, info.nar_size);
-      packages.push(Package::new(name, version.unwrap_or("<none>")));
+      packages.push(Package {
+        name:    name.to_owned(),
+        version: version.map(Version::new),
+      });
     }
 
     Self {
@@ -354,8 +358,8 @@ mod tests {
     assert_eq!(change.versions.len(), 1);
     match &change.versions[0] {
       VersionDiff::Changed { old, new } => {
-        assert_eq!(old.version.name, old_hash);
-        assert_eq!(new.version.name, new_hash);
+        assert_eq!(old.version, Some(Version::new(old_hash)));
+        assert_eq!(new.version, Some(Version::new(new_hash)));
       },
       other => panic!("expected changed version diff, got {other:?}"),
     }
