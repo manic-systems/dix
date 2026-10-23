@@ -104,6 +104,12 @@ pub trait StoreBackend: Display {
   fn query_closure_path_info(&self, path: &Path) -> Result<Vec<StorePathInfo>>;
 }
 
+thread_local! {
+  /// The backend shared by all store queries on this thread, so the Nix
+  /// database is opened, and a failure to open it reported, only once.
+  pub static STORE: CombinedStoreBackend = CombinedStoreBackend::open();
+}
+
 /// combines multiple store backends by falling back to the next one if the
 /// current one fails.
 ///
@@ -123,8 +129,7 @@ impl CombinedStoreBackend {
   ///
   /// The database is never opened with `?immutable=1`, since that can silently
   /// produce wrong results while Nix writes to it.
-  #[must_use]
-  pub fn open() -> Self {
+  fn open() -> Self {
     let mut backends: Vec<Box<dyn StoreBackend>> = Vec::new();
     match DbConnection::open(DATABASE_PATH) {
       Ok(db) => backends.push(Box::new(db)),

@@ -362,11 +362,14 @@ fn print_last(
   options: RenderOptions,
 ) -> misstep::Result<()> {
   let generations = select_generations(profile, span)?;
-  let paths = generations
+  let snapshots = generations
     .iter()
-    .map(|generation| generation.path.as_path())
+    .map(|generation| dix::query_snapshot_document(&generation.path))
+    .collect::<misstep::Result<Vec<_>>>()?;
+  let reports = snapshots
+    .array_windows()
+    .map(|[old, new]| dix::diff_store_snapshots(&old.snapshot, &new.snapshot))
     .collect::<Vec<_>>();
-  let reports = dix::query_adjacent_diff_reports(&paths)?;
   let transitions = generations.array_windows().zip(&reports);
 
   match output {
