@@ -35,7 +35,7 @@ pub struct StoreSnapshot {
 ///
 /// Returns an error if the backend cannot query the path, or the path is not
 /// a valid store path.
-pub(crate) fn query_store_snapshot_with_backend(
+pub fn query_store_snapshot_with_backend(
   backend: &dyn StoreBackend,
   path: &Path,
 ) -> Result<StoreSnapshot> {
