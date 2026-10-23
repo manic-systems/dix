@@ -9,8 +9,9 @@ const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
 /// A version string with semantic comparison support.
 ///
 /// Ordering compares separator-delimited components. Empty versions sort before
-/// non-empty versions; after a shared prefix, text suffixes sort below the base
-/// version and numeric suffixes sort above it. `Ord` uses the raw version
+/// non-empty versions. After a shared prefix, pre-release suffixes such as
+/// `-rc1` sort below the base version, and other suffixes, such as
+/// `-unstable-2026-01-25` or numbers, sort above it. `Ord` uses the raw version
 /// string as a final tie-breaker so distinct strings remain distinct
 /// ordered-map keys.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -149,22 +150,27 @@ fn component_rank(
   component: Option<VersionComponent<'_>>,
 ) -> ComponentRank {
   // The first slot sorts empty versions below real versions. After a shared
-  // prefix, text suffixes sort below the base and numeric suffixes above it.
-  match (index, component.map(|component| component.is_numeric())) {
-    (_, None) => ComponentRank::Missing,
-    (0, Some(true)) => ComponentRank::FirstNumeric,
-    (0, Some(false)) => ComponentRank::FirstText,
-    (_, Some(false)) => ComponentRank::SuffixText,
-    (_, Some(true)) => ComponentRank::SuffixNumeric,
+  // prefix, pre-release suffixes sort below the base, and other suffixes above
+  // it, since a text suffix in nixpkgs usually marks a later snapshot.
+  let Some(component) = component else {
+    return ComponentRank::Missing;
+  };
+  match (index, component.is_numeric()) {
+    (0, true) => ComponentRank::FirstNumeric,
+    (0, false) => ComponentRank::FirstText,
+    (_, true) => ComponentRank::SuffixNumeric,
+    (_, false) if component.is_pre_release() => ComponentRank::PreRelease,
+    (_, false) => ComponentRank::SuffixText,
   }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ComponentRank {
-  SuffixText,
+  PreRelease,
   Missing,
   FirstNumeric,
   FirstText,
+  SuffixText,
   SuffixNumeric,
 }
 
@@ -284,12 +290,27 @@ impl VersionComponent<'_> {
     self.is_numeric().then(|| self.0.parse().ok()).flatten()
   }
 
+  /// Whether the component marks a pre-release, ignoring case.
+  fn is_pre_release(&self) -> bool {
+    PRE_RELEASE_MARKERS.iter().any(|marker| {
+      self
+        .0
+        .get(..marker.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(marker))
+    })
+  }
+
   fn is_git_hash_pair(&self, other: Self) -> bool {
     is_hex_hash_component(self.0)
       && is_hex_hash_component(other.0)
       && (has_ascii_hex_letter(self.0) || has_ascii_hex_letter(other.0))
   }
 }
+
+/// Prefixes of components that mark a pre-release, such as `rc1` or `beta`.
+/// `pre` also covers `preview`. `dev` is left out, since it is far more often
+/// the name of a store path's `dev` output than a pre-release.
+const PRE_RELEASE_MARKERS: &[&str] = &["alpha", "beta", "pre", "rc"];
 
 /// Whether `component` looks like an abbreviated or full Git commit hash.
 #[must_use]
@@ -323,13 +344,7 @@ impl Ord for VersionComponent<'_> {
           _ => self.0.cmp(other.0),
         }
       },
-      (false, false) => {
-        match (self.0, other.0) {
-          ("pre", _) => cmp::Ordering::Less,
-          (_, "pre") => cmp::Ordering::Greater,
-          _ => self.0.cmp(other.0),
-        }
-      },
+      (false, false) => self.0.cmp(other.0),
       (true, false) => cmp::Ordering::Less,
       (false, true) => cmp::Ordering::Greater,
     }
@@ -589,13 +604,6 @@ mod tests {
   }
 
   #[test]
-  fn component_comparison_pre_special_case() {
-    assert!(VersionComponent("pre") < VersionComponent("alpha"));
-    assert!(VersionComponent("pre") > VersionComponent("1")); // text > numeric
-    assert!(VersionComponent("alpha") > VersionComponent("pre"));
-  }
-
-  #[test]
   fn component_comparison_mixed_types() {
     assert!(VersionComponent("2") < VersionComponent("alpha"));
     assert!(VersionComponent("alpha") > VersionComponent("2"));
@@ -623,6 +631,65 @@ mod tests {
     assert!(Version::new("1.0.0-alpha") < Version::new("1.0.0-beta"));
     assert!(Version::new("1.0.0-1") < Version::new("1.0.0-2"));
     assert!(Version::new("1.0.0-9") < Version::new("1.0.0-10"));
+  }
+
+  #[test]
+  fn unstable_snapshot_is_newer_than_its_base_release() {
+    // https://github.com/manic-systems/dix/issues/99
+    let base = Version::new("7.1.0");
+    let unstable = Version::new("7.1.0-unstable-2026-01-25");
+
+    assert!(unstable > base);
+    assert_eq!(
+      base.change_ordering(&unstable),
+      VersionChangeOrdering::Ordered(std::cmp::Ordering::Less)
+    );
+  }
+
+  #[test]
+  fn unstable_snapshot_is_older_than_the_next_release() {
+    assert!(Version::new("7.1.0-unstable-2026-01-25") < Version::new("7.1.1"));
+  }
+
+  #[test]
+  fn pre_release_suffixes_sort_below_the_base_version() {
+    for pre_release in [
+      "1.0-alpha",
+      "1.0-beta2",
+      "1.0-pre1234",
+      "1.0-preview",
+      "1.0-rc1",
+      "1.0-RC1",
+    ] {
+      assert!(
+        Version::new(pre_release) < Version::new("1.0"),
+        "{pre_release}"
+      );
+    }
+  }
+
+  #[test]
+  fn other_text_suffixes_sort_above_the_base_version() {
+    for later in [
+      "1.0-unstable-2026-01-25",
+      "1.0-git-2026-01-25",
+      "1.0.post1",
+      "1.0-p1",
+    ] {
+      assert!(Version::new(later) > Version::new("1.0"), "{later}");
+    }
+  }
+
+  #[test]
+  fn output_suffixes_sort_above_the_base_version() {
+    for output in ["1.0-bin", "1.0-dev", "1.0-lib", "1.0-man"] {
+      assert!(Version::new(output) > Version::new("1.0"), "{output}");
+    }
+  }
+
+  #[test]
+  fn pre_release_sorts_below_a_later_snapshot_of_the_same_base() {
+    assert!(Version::new("1.0-rc1") < Version::new("1.0-unstable-2026-01-25"));
   }
 
   #[test]

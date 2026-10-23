@@ -394,6 +394,14 @@ mod tests {
   }
 
   #[test]
+  fn generate_diffs_unstable_snapshot_is_upgrade() {
+    // https://github.com/manic-systems/dix/issues/99
+    let diff = change_for("pacman", &["7.1.0"], &["7.1.0-unstable-2026-01-25"]);
+
+    assert_eq!(diff.status, DiffStatus::Upgraded);
+  }
+
+  #[test]
   fn generate_diffs_upgraded() {
     let diff = change_for("pkg", &["1.0.0"], &["2.0.0"]);
 
