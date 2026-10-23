@@ -28,7 +28,7 @@ pub use render::{
   write_diff_report,
   write_hidden_note,
 };
-pub mod report;
+mod report;
 pub use report::{
   ChangeKind,
   DerivationSelectionStatus,
@@ -40,7 +40,7 @@ pub use report::{
   query_adjacent_diff_reports,
 };
 
-pub mod snapshot;
+mod snapshot;
 pub use snapshot::{
   SNAPSHOT_FORMAT_VERSION,
   SnapshotDocument,

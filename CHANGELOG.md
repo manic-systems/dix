@@ -59,6 +59,8 @@ This is a changelog of the `dix` repository. It follows the
 - **Breaking:** Removed `query_diff_report` and `query_store_snapshot`. Use
   `diff_store_snapshots` on the `snapshot` of two `query_snapshot_document`
   results instead.
+- **Breaking:** The `report` and `snapshot` modules are private. Their items
+  are still exported from the crate root.
 - **Breaking:** `json::display_diff` is replaced by `json::write_report`, which
   serializes an already queried report instead of querying and printing it.
 - **Breaking:** `DiffReport`, `PathStats` and `PackageSizeDelta` expose public
