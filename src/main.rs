@@ -1,4 +1,5 @@
 use std::{
+  cell::LazyCell,
   env,
   fmt::{
     self,
@@ -234,7 +235,7 @@ fn main() -> misstep::Result<()> {
 ///
 /// Returns an error if the snapshot cannot be queried or written.
 fn print_snapshot(path: &Path) -> misstep::Result<()> {
-  let document = dix::query_snapshot_document(path)?;
+  let document = dix::Store::open().query_snapshot_document(path)?;
   let mut out = io::stdout().lock();
   serde_json::to_writer(&mut out, &document)?;
   writeln!(out)?;
@@ -258,8 +259,10 @@ fn print_diff(
   output: OutputFormat,
   options: RenderOptions,
 ) -> misstep::Result<()> {
-  let old = load_snapshot(old_path)?;
-  let new = load_snapshot(new_path)?;
+  // Only opened if an argument is not a snapshot file.
+  let store: LazyCell<dix::Store> = LazyCell::new(dix::Store::open);
+  let old = load_snapshot(old_path, &store)?;
+  let new = load_snapshot(new_path, &store)?;
   let report = dix::diff_store_snapshots(&old.snapshot, &new.snapshot);
   match output {
     OutputFormat::Human => {
@@ -277,7 +280,7 @@ fn print_diff(
 }
 
 /// Reads the snapshot in `path` if it is a JSON file, and queries the store
-/// path `path` resolves to otherwise.
+/// path `path` resolves to in `store` otherwise.
 ///
 /// # Returns
 ///
@@ -287,9 +290,12 @@ fn print_diff(
 ///
 /// Returns an error if `path` is a JSON file that is not a valid snapshot, or
 /// the store cannot be queried.
-fn load_snapshot(path: &Path) -> misstep::Result<SnapshotDocument> {
+fn load_snapshot(
+  path: &Path,
+  store: &LazyCell<dix::Store>,
+) -> misstep::Result<SnapshotDocument> {
   if !is_json_file(path)? {
-    return dix::query_snapshot_document(path);
+    return store.query_snapshot_document(path);
   }
 
   tracing::debug!(path = %path.display(), "reading snapshot");
@@ -341,8 +347,10 @@ fn print_last(
   options: RenderOptions,
 ) -> misstep::Result<()> {
   let generations = select_generations(profile, span)?;
+  let store = dix::Store::open();
   let mut snapshots = generations.iter().map(|generation| {
-    dix::query_snapshot_document(&generation.path)
+    store
+      .query_snapshot_document(&generation.path)
       .map(|document| document.snapshot)
   });
   let mut reports = Vec::with_capacity(generations.len().saturating_sub(1));
