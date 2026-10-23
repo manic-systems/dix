@@ -16,7 +16,7 @@ Diff Nix
 Usage: dix [OPTION]... COMMAND
 
 Commands:
-  diff      Show the differences between two store paths
+  diff      Show the differences between two store paths or snapshots
   last      Show successive changes ending at the current profile generation
   snapshot  Print the closure of a store path as a versioned JSON snapshot
   help      Print help for a command
@@ -60,6 +60,19 @@ another unnumbered profile link, for example
 `dix snapshot <PATH>` prints the closure of a store path as JSON, so it can be
 diffed on another machine. [nh](https://github.com/nix-community/nh) uses this
 to diff deployments to remote hosts, which requires dix on the target host.
+
+`dix diff` reads any argument that is a JSON file as a snapshot, so snapshots
+can be diffed against each other or against store paths. In CI, this lets the
+old and new closures be built concurrently in separate jobs:
+
+```bash
+# job 1
+$ dix snapshot ./result > old.json
+# job 2
+$ dix snapshot ./result > new.json
+# job 3, with both snapshots as artifacts
+$ dix diff old.json new.json
+```
 
 ```json
 {

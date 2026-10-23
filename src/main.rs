@@ -7,6 +7,7 @@ use std::{
   fs,
   io::{
     self,
+    BufRead as _,
     IsTerminal as _,
     Write as _,
   },
@@ -20,9 +21,13 @@ use std::{
 use dix::{
   DiffReport,
   RenderOptions,
+  SnapshotDocument,
   json,
 };
-use misstep::report;
+use misstep::{
+  ResultExt as _,
+  report,
+};
 use pound::{
   Parse,
   ValueEnum,
@@ -70,9 +75,11 @@ enum ColorChoice {
 
 #[derive(Parse, Debug, PartialEq, Eq)]
 enum Command {
-  /// Show the differences between two store paths.
+  /// Show the differences between two store paths or snapshots.
   Diff {
+    /// Store path, or JSON file written by `dix snapshot`.
     old_path: PathBuf,
+    /// Store path, or JSON file written by `dix snapshot`.
     new_path: PathBuf,
 
     /// Select the output format to use.
@@ -244,7 +251,8 @@ fn print_snapshot(path: &Path) -> misstep::Result<()> {
   Ok(())
 }
 
-/// Prints the diff between `old_path` and `new_path` to stdout.
+/// Prints the diff between `old_path` and `new_path`, each a store path or
+/// snapshot file, to stdout.
 ///
 /// # Returns
 ///
@@ -252,8 +260,8 @@ fn print_snapshot(path: &Path) -> misstep::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if a path does not exist, the store cannot be queried, or
-/// the output cannot be written.
+/// Returns an error if a path does not exist, a snapshot is invalid, the store
+/// cannot be queried, or the output cannot be written.
 fn print_diff(
   old_path: &Path,
   new_path: &Path,
@@ -271,15 +279,49 @@ fn print_diff(
 
   tracing::info!(old_path = %old_path.display(), new_path = %new_path.display(), "paths validated");
 
-  let report = dix::query_diff_report(old_path, new_path)?;
+  let old = load_snapshot(old_path)?;
+  let new = load_snapshot(new_path)?;
+  let report = dix::diff_store_snapshots(&old.snapshot, &new.snapshot);
   match output {
     OutputFormat::Human => {
-      let hidden = display_diff(old_path, new_path, &report, options)?;
+      let hidden = display_diff(&old.path, &new.path, &report, options)?;
       dix::write_hidden_note(&mut io::stdout().lock(), hidden, "--full")?;
       Ok(())
     },
     OutputFormat::Json => json::write_report(io::stdout(), &report),
   }
+}
+
+/// Reads the snapshot in `path` if it is a JSON file, and queries the store
+/// path `path` resolves to otherwise.
+///
+/// # Returns
+///
+/// The snapshot read from, or queried for, `path`.
+///
+/// # Errors
+///
+/// Returns an error if `path` is a JSON file that is not a valid snapshot, or
+/// the store cannot be queried.
+fn load_snapshot(path: &Path) -> misstep::Result<SnapshotDocument> {
+  if !is_json_file(path)? {
+    return dix::query_snapshot_document(path);
+  }
+
+  tracing::debug!(path = %path.display(), "reading snapshot");
+  let input = fs::read_to_string(path)?;
+  SnapshotDocument::from_json(&input)
+    .with_context(|| format!("failed to read snapshot '{}'", path.display()))
+}
+
+/// Checks whether `path` is a file holding a JSON object, by its first
+/// non-whitespace byte.
+fn is_json_file(path: &Path) -> io::Result<bool> {
+  if !path.is_file() {
+    return Ok(false);
+  }
+  let mut reader = io::BufReader::new(fs::File::open(path)?);
+  Ok(reader.fill_buf()?.trim_ascii_start().starts_with(b"{"))
 }
 
 /// One transition in the array printed by `dix last --output json`.
