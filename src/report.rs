@@ -8,7 +8,6 @@ use size::Size;
 
 use crate::{
   DiffStatus,
-  StorePath,
   VersionDiff,
   diff::{
     Package,
@@ -224,16 +223,12 @@ struct SnapshotPackages {
 }
 
 impl SnapshotPackages {
-  /// `side` names the snapshot in warnings about unparsable paths.
-  fn new(snapshot: &StoreSnapshot, side: &str) -> Self {
+  fn new(snapshot: &StoreSnapshot) -> Self {
     let mut packages = Vec::new();
     let mut sizes = BTreeMap::<String, Size>::new();
 
     for info in &snapshot.closure {
-      let Some((name, version)) = parse_store_path_lossy(&info.path, side)
-      else {
-        continue;
-      };
+      let (name, version) = info.path.name_and_version();
       add_package_size(&mut sizes, name, info.nar_size);
       packages.push(Package::new(name, version.unwrap_or("<none>")));
     }
@@ -243,8 +238,7 @@ impl SnapshotPackages {
       selected: snapshot
         .selected
         .iter()
-        .filter_map(|path| parse_store_path_lossy(path, side))
-        .map(|(name, _)| name.to_owned())
+        .map(|path| path.name_and_version().0.to_owned())
         .collect(),
       sizes,
     }
@@ -259,8 +253,8 @@ pub fn diff_store_snapshots(
 ) -> DiffReport {
   let report = DiffReport {
     diffs:      package_diffs_with_sizes(
-      &SnapshotPackages::new(old, "old"),
-      &SnapshotPackages::new(new, "new"),
+      &SnapshotPackages::new(old),
+      &SnapshotPackages::new(new),
     ),
     path_stats: PathStats::between(&old.closure, &new.closure),
     size_old:   total_nar_size(&old.closure),
@@ -281,23 +275,12 @@ pub fn diff_store_snapshots(
   report
 }
 
-fn parse_store_path_lossy<'a>(
-  path: &'a StorePath,
-  side: &str,
-) -> Option<(&'a str, Option<&'a str>)> {
-  path
-    .parse_name_and_version()
-    .inspect_err(|error| {
-      tracing::warn!(path = %path.display(), "dropping unparsable {side} path: {error}");
-    })
-    .ok()
-}
-
 #[cfg(test)]
 mod tests {
   use std::path::PathBuf;
 
   use super::*;
+  use crate::StorePath;
 
   fn store_path_with_hash(hash: &str, name: &str) -> StorePath {
     StorePath::try_from(PathBuf::from(format!("/nix/store/{hash}-{name}")))
