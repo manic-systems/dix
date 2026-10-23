@@ -266,28 +266,6 @@ impl SnapshotPackages {
   }
 }
 
-/// Queries Nix store data and builds a pure diff report.
-///
-/// # Errors
-///
-/// Returns an error if package querying fails.
-pub fn query_diff_report(
-  path_old: &Path,
-  path_new: &Path,
-) -> Result<DiffReport> {
-  tracing::debug!(
-    old_path = %path_old.display(),
-    new_path = %path_new.display(),
-    "starting diff report computation"
-  );
-
-  let backend = CombinedStoreBackend::open();
-  Ok(diff_store_snapshots(
-    &query_store_snapshot_with_backend(&backend, path_old)?,
-    &query_store_snapshot_with_backend(&backend, path_new)?,
-  ))
-}
-
 /// Queries consecutive paths on one store backend and diffs adjacent
 /// snapshots. Each path is queried once, even when it participates in two
 /// comparisons.

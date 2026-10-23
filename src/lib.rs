@@ -38,7 +38,6 @@ pub use report::{
   PathStats,
   diff_store_snapshots,
   query_adjacent_diff_reports,
-  query_diff_report,
 };
 
 pub mod snapshot;
