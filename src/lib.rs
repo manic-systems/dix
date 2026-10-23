@@ -41,7 +41,6 @@ pub use report::{
 
 mod snapshot;
 pub use snapshot::{
-  SNAPSHOT_FORMAT_VERSION,
   SnapshotDocument,
   StoreSnapshot,
   query_snapshot_document,

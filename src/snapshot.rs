@@ -60,12 +60,12 @@ pub fn query_store_snapshot_with_backend(
 /// Version of the [`SnapshotDocument`] JSON format.
 ///
 /// Bump this whenever the format changes in a way older readers cannot handle.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 
 /// A snapshot of a single store path's closure.
 ///
-/// It serializes with the current [`SNAPSHOT_FORMAT_VERSION`], and is parsed
-/// with [`SnapshotDocument::from_json`].
+/// It serializes with the current format version, and is parsed with
+/// [`SnapshotDocument::from_json`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotDocument {
   /// The canonical store path the snapshot was taken of.
