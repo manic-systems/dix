@@ -8,6 +8,7 @@ use misstep::{
 use serde::{
   Deserialize,
   Serialize,
+  Serializer,
 };
 
 use crate::{
@@ -61,31 +62,41 @@ pub fn query_store_snapshot_with_backend(
 /// Bump this whenever the format changes in a way older readers cannot handle.
 pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 
-/// A versioned, serializable snapshot of a single store path's closure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A snapshot of a single store path's closure.
+///
+/// It serializes with the current [`SNAPSHOT_FORMAT_VERSION`], and is parsed
+/// with [`SnapshotDocument::from_json`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotDocument {
-  pub version:  u32,
   /// The canonical store path the snapshot was taken of.
   pub path:     StorePath,
-  #[serde(flatten)]
   pub snapshot: StoreSnapshot,
 }
 
-impl SnapshotDocument {
-  /// Wraps the `snapshot` of `path` in a document.
-  ///
-  /// # Returns
-  ///
-  /// A document of the current [`SNAPSHOT_FORMAT_VERSION`].
-  #[must_use]
-  pub const fn new(path: StorePath, snapshot: StoreSnapshot) -> Self {
-    Self {
-      version: SNAPSHOT_FORMAT_VERSION,
-      path,
-      snapshot,
-    }
-  }
+/// The JSON form of a [`SnapshotDocument`].
+#[derive(Serialize, Deserialize)]
+struct VersionedDocument<P, S> {
+  version:  u32,
+  path:     P,
+  #[serde(flatten)]
+  snapshot: S,
+}
 
+impl Serialize for SnapshotDocument {
+  fn serialize<S: Serializer>(
+    &self,
+    serializer: S,
+  ) -> std::result::Result<S::Ok, S::Error> {
+    VersionedDocument {
+      version:  SNAPSHOT_FORMAT_VERSION,
+      path:     &self.path,
+      snapshot: &self.snapshot,
+    }
+    .serialize(serializer)
+  }
+}
+
+impl SnapshotDocument {
   /// Parses a document from JSON.
   ///
   /// The format version is checked before anything else, so documents written
@@ -114,9 +125,11 @@ impl SnapshotDocument {
       );
     }
 
-    serde_json::from_str(input)
-      .context("failed to parse dix snapshot document")
-      .erase()
+    let VersionedDocument { path, snapshot, .. } = serde_json::from_str::<
+      VersionedDocument<StorePath, StoreSnapshot>,
+    >(input)
+    .context("failed to parse dix snapshot document")?;
+    Ok(Self { path, snapshot })
   }
 }
 
@@ -139,7 +152,10 @@ pub fn query_snapshot_document(path: &Path) -> Result<SnapshotDocument> {
     &CombinedStoreBackend::open(),
     &store_path,
   )?;
-  Ok(SnapshotDocument::new(store_path, snapshot))
+  Ok(SnapshotDocument {
+    path: store_path,
+    snapshot,
+  })
 }
 
 #[cfg(test)]
@@ -158,19 +174,22 @@ mod tests {
   fn document() -> SnapshotDocument {
     let system = store_path(1, "nixos-system-25.11");
     let bash = store_path(2, "bash-5.2.15");
-    SnapshotDocument::new(system.clone(), StoreSnapshot {
-      closure:  vec![
-        StorePathInfo {
-          path:     system,
-          nar_size: Size::from_bytes(1),
-        },
-        StorePathInfo {
-          path:     bash.clone(),
-          nar_size: Size::from_bytes(5_000_000),
-        },
-      ],
-      selected: vec![bash],
-    })
+    SnapshotDocument {
+      path:     system.clone(),
+      snapshot: StoreSnapshot {
+        closure:  vec![
+          StorePathInfo {
+            path:     system,
+            nar_size: Size::from_bytes(1),
+          },
+          StorePathInfo {
+            path:     bash.clone(),
+            nar_size: Size::from_bytes(5_000_000),
+          },
+        ],
+        selected: vec![bash],
+      },
+    }
   }
 
   fn to_json(document: &SnapshotDocument) -> String {

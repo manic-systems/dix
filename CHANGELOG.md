@@ -21,8 +21,9 @@ This is a changelog of the `dix` repository. It follows the
   captured on one machine (e.g. a remote deployment target) and diffed on
   another.
 - `StorePath`, `StorePathInfo` and `StoreSnapshot` now implement
-  `Serialize`/`Deserialize`. `SnapshotDocument::from_json` rejects unknown
-  format versions before parsing anything else.
+  `Serialize`/`Deserialize`. `SnapshotDocument` serializes with the current
+  format version, and `SnapshotDocument::from_json` rejects unknown format
+  versions before parsing anything else.
 - `dix diff` accepts JSON files written by `dix snapshot` in place of either
   store path.
 
