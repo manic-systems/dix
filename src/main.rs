@@ -362,14 +362,18 @@ fn print_last(
   options: RenderOptions,
 ) -> misstep::Result<()> {
   let generations = select_generations(profile, span)?;
-  let snapshots = generations
-    .iter()
-    .map(|generation| dix::query_snapshot_document(&generation.path))
-    .collect::<misstep::Result<Vec<_>>>()?;
-  let reports = snapshots
-    .array_windows()
-    .map(|[old, new]| dix::diff_store_snapshots(&old.snapshot, &new.snapshot))
-    .collect::<Vec<_>>();
+  let mut snapshots = generations.iter().map(|generation| {
+    dix::query_snapshot_document(&generation.path)
+      .map(|document| document.snapshot)
+  });
+  let mut reports = Vec::with_capacity(generations.len().saturating_sub(1));
+  if let Some(mut old) = snapshots.next().transpose()? {
+    for new in snapshots {
+      let new = new?;
+      reports.push(dix::diff_store_snapshots(&old, &new));
+      old = new;
+    }
+  }
   let transitions = generations.array_windows().zip(&reports);
 
   match output {
