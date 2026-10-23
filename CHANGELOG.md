@@ -23,6 +23,8 @@ This is a changelog of the `dix` repository. It follows the
 - `StorePath`, `StorePathInfo` and `StoreSnapshot` now implement
   `Serialize`/`Deserialize`. `SnapshotDocument::from_json` rejects unknown
   format versions before parsing anything else.
+- `dix diff` accepts JSON files written by `dix snapshot` in place of either
+  store path.
 
 ### Fixed
 
