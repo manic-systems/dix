@@ -8,9 +8,10 @@ const SEPARATORS: &[char] = &['.', '-', '_', '+', '*', '=', '×', ' '];
 
 /// A version string with semantic comparison support.
 ///
-/// Ordering compares separator-delimited components. Empty versions sort before
-/// non-empty versions. After a shared prefix, pre-release suffixes such as
-/// `-rc1` sort below the base version, and other suffixes, such as
+/// Ordering compares separator-delimited components, and within them digits by
+/// value and other characters alphabetically, ignoring case. Empty versions
+/// sort before non-empty versions. After a shared prefix, pre-release suffixes
+/// such as `-rc1` sort below the base version, and other suffixes, such as
 /// `-unstable-2026-01-25` or numbers, sort above it. `Ord` uses the raw version
 /// string as a final tie-breaker so distinct strings remain distinct
 /// ordered-map keys.
@@ -289,19 +290,11 @@ impl VersionComponent<'_> {
     !self.0.is_empty() && self.0.bytes().all(|b| b.is_ascii_digit())
   }
 
-  #[must_use]
-  pub fn as_u64(&self) -> Option<u64> {
-    self.is_numeric().then(|| self.0.parse().ok()).flatten()
-  }
-
-  /// Compares two components of the same [`ComponentRank`]: numbers by value,
-  /// and text alphabetically. Whether numbers or text sort first is decided by
-  /// the rank, which depends on the component's position.
+  /// Compares two components of the same [`ComponentRank`] segment by segment.
+  /// Whether numbers or text sort first is decided by the rank, which depends
+  /// on the component's position.
   fn cmp_within_rank(self, other: Self) -> cmp::Ordering {
-    match (self.as_u64(), other.as_u64()) {
-      (Some(a), Some(b)) => a.cmp(&b),
-      _ => self.0.cmp(other.0),
-    }
+    Segment::split(self.0).cmp(Segment::split(other.0))
   }
 
   /// Whether the component marks a pre-release, ignoring case.
@@ -320,6 +313,59 @@ impl VersionComponent<'_> {
       && (has_ascii_hex_letter(self.0) || has_ascii_hex_letter(other.0))
   }
 }
+
+/// The longest stretch of digits, or of other characters, in a component, such
+/// as `rc` and `10` in `rc10`. Digit segments compare by value and sort below
+/// text segments, which compare alphabetically, ignoring case.
+#[derive(Clone, Copy)]
+struct Segment<'a>(&'a [u8]);
+
+impl<'a> Segment<'a> {
+  fn split(component: &'a str) -> impl Iterator<Item = Self> {
+    component
+      .as_bytes()
+      .chunk_by(|a, b| a.is_ascii_digit() == b.is_ascii_digit())
+      .map(Segment)
+  }
+
+  /// The digits of the segment without leading zeros, or `None` if it is text.
+  fn digits(self) -> Option<&'a [u8]> {
+    self.0.first()?.is_ascii_digit().then(|| {
+      let zeros = self.0.iter().take_while(|&&b| b == b'0').count();
+      &self.0[zeros..]
+    })
+  }
+}
+
+impl Ord for Segment<'_> {
+  fn cmp(&self, other: &Self) -> cmp::Ordering {
+    match (self.digits(), other.digits()) {
+      // Without leading zeros, a longer number is a larger one.
+      (Some(a), Some(b)) => a.len().cmp(&b.len()).then_with(|| a.cmp(b)),
+      (Some(_), None) => cmp::Ordering::Less,
+      (None, Some(_)) => cmp::Ordering::Greater,
+      (None, None) => {
+        let lowercase =
+          |segment: &Self| segment.0.iter().map(u8::to_ascii_lowercase);
+        lowercase(self).cmp(lowercase(other))
+      },
+    }
+  }
+}
+
+impl PartialOrd for Segment<'_> {
+  fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl PartialEq for Segment<'_> {
+  fn eq(&self, other: &Self) -> bool {
+    self.cmp(other).is_eq()
+  }
+}
+
+impl Eq for Segment<'_> {}
 
 /// Prefixes of components that mark a pre-release, such as `rc1` or `beta`.
 /// `pre` also covers `preview`. `dev` is left out, since it is far more often
@@ -568,19 +614,6 @@ mod tests {
     assert!(!VersionComponent("123abc").is_numeric());
     assert!(!VersionComponent("").is_numeric());
     assert!(!VersionComponent("12.3").is_numeric());
-  }
-
-  #[test]
-  fn version_component_as_u64() {
-    assert_eq!(VersionComponent("123").as_u64(), Some(123));
-    assert_eq!(VersionComponent("0").as_u64(), Some(0));
-    assert_eq!(
-      VersionComponent("18446744073709551615").as_u64(),
-      Some(u64::MAX)
-    );
-    assert_eq!(VersionComponent("abc").as_u64(), None);
-    assert_eq!(VersionComponent("123abc").as_u64(), None);
-    assert_eq!(VersionComponent("").as_u64(), None);
   }
 
   #[test]
