@@ -15,8 +15,8 @@ include      = [ "CHANGELOG.md", "Cargo.lock", "Cargo.toml", "LICENSE.md", "READ
 [dependencies]
 diff       = "0.1.13"
 misstep    = { features = [ "color", "pretty" ], version = "0.4.1" }
-pound      = { optional = true, version = "0.5.1" }
-rusqlite   = { default-features = false, features = [ "cache" ], optional = true, version = "0.40.0" }
+pound      = { optional = true, version = "0.6.1" }
+rusqlite   = { default-features = false, features = [ "cache" ], optional = true, version = "0.41.0" }
 serde      = { features = [ "derive" ], version = "1.0.228" }
 serde_json = "1.0.149"
 size       = "0.6.0"
