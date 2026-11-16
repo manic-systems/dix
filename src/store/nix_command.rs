@@ -74,9 +74,11 @@ fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
   output
     .lines()
     .map(|line| {
-      StorePath::try_from(line.to_owned()).with_context(|| {
-        format!("encountered invalid path in nix command output: {line}")
-      })
+      StorePath::try_from(line.to_owned())
+        .with_context(|| {
+          format!("encountered invalid path in nix command output: {line}")
+        })
+        .erase()
     })
     .collect()
 }

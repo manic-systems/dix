@@ -374,13 +374,14 @@ fn load_snapshot(
   store: &LazyCell<dix::Store>,
 ) -> misstep::Result<SnapshotDocument> {
   if !is_json_file(path)? {
-    return store.query_snapshot_document(path);
+    return Ok(store.query_snapshot_document(path)?);
   }
 
   tracing::debug!(path = %path.display(), "reading snapshot");
   let input = fs::read_to_string(path)?;
   SnapshotDocument::from_json(&input)
     .with_context(|| format!("failed to read snapshot '{}'", path.display()))
+    .erase()
 }
 
 /// Checks whether `path` is a file holding a JSON object, by its first

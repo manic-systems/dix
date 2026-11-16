@@ -1,8 +1,3 @@
-use misstep::{
-  Result,
-  ResultExt as _,
-  bail,
-};
 use serde::{
   Deserialize,
   Serialize,
@@ -10,7 +5,10 @@ use serde::{
 };
 use size::Size;
 
-use crate::StorePath;
+use crate::{
+  Error,
+  StorePath,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +73,7 @@ pub struct StoreSnapshot {
 /// Version of the [`SnapshotDocument`] JSON format.
 ///
 /// Bump this whenever the format changes in a way older readers cannot handle.
-const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 
 /// A snapshot of a single store path's closure.
 ///
@@ -125,25 +123,22 @@ impl SnapshotDocument {
   ///
   /// Returns an error if the input is not a snapshot document, has an
   /// unsupported format version, or contains invalid data.
-  pub fn from_json(input: &str) -> Result<Self> {
+  pub fn from_json(input: &str) -> Result<Self, Error> {
     #[derive(Deserialize)]
     struct VersionProbe {
       version: u32,
     }
 
-    let VersionProbe { version } = serde_json::from_str(input)
-      .context("input is not a dix snapshot document")?;
+    let VersionProbe { version } =
+      serde_json::from_str(input).map_err(Error::NotASnapshot)?;
     if version != SNAPSHOT_FORMAT_VERSION {
-      bail!(
-        "unsupported dix snapshot format version {version} (supported: \
-         {SNAPSHOT_FORMAT_VERSION})"
-      );
+      return Err(Error::UnsupportedSnapshotVersion(version));
     }
 
     let VersionedDocument { path, snapshot, .. } = serde_json::from_str::<
       VersionedDocument<StorePath, StoreSnapshot>,
     >(input)
-    .context("failed to parse dix snapshot document")?;
+    .map_err(Error::InvalidSnapshot)?;
     Ok(Self { path, snapshot })
   }
 }
