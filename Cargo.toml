@@ -15,7 +15,7 @@ include      = [ "CHANGELOG.md", "Cargo.lock", "Cargo.toml", "LICENSE.md", "READ
 [dependencies]
 caress     = { optional = true, version = "0.3.0" }
 diff       = "0.1.13"
-misstep    = { features = [ "color", "pretty" ], version = "0.4.1" }
+misstep    = { optional = true, version = "0.4.1" }
 pound      = { optional = true, version = "0.6.1" }
 rusqlite   = { default-features = false, features = [ "cache" ], optional = true, version = "0.43.0" }
 serde      = { features = [ "derive" ], version = "1.0.228" }
@@ -31,9 +31,17 @@ optional         = true
 version          = "0.3"
 
 [features]
-cli     = [ "dep:caress", "dep:pound", "dep:tracing-subscriber", "store" ]
+cli = [
+  "dep:caress",
+  "dep:misstep",
+  "dep:pound",
+  "dep:tracing-subscriber",
+  "misstep/color",
+  "misstep/pretty",
+  "store",
+]
 default = [ "cli", "store" ]
-store   = [ "dep:rusqlite" ]
+store = [ "dep:misstep", "dep:rusqlite" ]
 
 [[bin]]
 name              = "dix"

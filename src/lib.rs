@@ -1,12 +1,8 @@
 use std::path::Path;
 
-use misstep::{
-  Report,
-  Result,
-  bail,
-};
-
 mod diff;
+mod error;
+pub use error::Error;
 pub mod json;
 
 pub use diff::{
@@ -83,10 +79,10 @@ impl std::ops::Deref for StorePath {
 }
 
 impl TryFrom<String> for StorePath {
-  type Error = Report;
+  type Error = Error;
 
   /// Accepts paths of the form `/nix/store/<hash>-<name>`.
-  fn try_from(path: String) -> Result<Self> {
+  fn try_from(path: String) -> Result<Self, Error> {
     tracing::trace!(path, "validating store path");
 
     let is_store_path = path
@@ -99,7 +95,7 @@ impl TryFrom<String> for StorePath {
           && !name.is_empty()
       });
     if !is_store_path {
-      bail!("path '{path}' is not of the form {STORE_DIR}<hash>-<name>");
+      return Err(Error::InvalidStorePath(path));
     }
 
     Ok(Self(path))

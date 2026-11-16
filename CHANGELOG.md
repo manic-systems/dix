@@ -6,6 +6,10 @@ This is a changelog of the `dix` repository. It follows the
 
 ## Unreleased
 
+### Changed
+
+- The library returns its own `dix::Error` instead of `misstep::Report`.
+
 ## 3.0.0
 
 ### Added

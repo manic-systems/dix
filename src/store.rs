@@ -16,14 +16,13 @@ use std::{
 pub use db::DbConnection;
 use misstep::{
   Result,
-  ResultExt as _,
-  bail,
   report,
 };
 pub use nix_command::CommandBackend;
 use tracing::warn;
 
 use crate::{
+  Error,
   SnapshotDocument,
   StorePath,
   StorePathInfo,
@@ -46,19 +45,25 @@ pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 pub fn query_store_snapshot_with_backend(
   backend: &dyn StoreBackend,
   path: &StorePath,
-) -> Result<StoreSnapshot> {
+) -> Result<StoreSnapshot, Error> {
   tracing::debug!(path = %path.display(), "querying closure path info");
-  let closure = backend.query_closure_path_info(path).with_context(|| {
-    format!("failed to query closure path info of '{}'", path.display())
+  let closure = backend.query_closure_path_info(path).map_err(|source| {
+    Error::ClosureQuery {
+      path:   path.clone(),
+      source: source.into(),
+    }
   })?;
   // The closure of a valid path contains at least the path itself.
   if closure.is_empty() {
-    bail!("'{}' is not a valid store path", path.display());
+    return Err(Error::PathNotValid(path.clone()));
   }
 
   tracing::debug!(path = %path.display(), "querying system derivations");
-  let selected = backend.query_system_derivations(path).with_context(|| {
-    format!("failed to query system derivations of '{}'", path.display())
+  let selected = backend.query_system_derivations(path).map_err(|source| {
+    Error::SelectionQuery {
+      path:   path.clone(),
+      source: source.into(),
+    }
   })?;
 
   Ok(StoreSnapshot { closure, selected })
@@ -96,14 +101,17 @@ impl Store {
   pub fn query_snapshot_document(
     &self,
     path: &Path,
-  ) -> Result<SnapshotDocument> {
-    let canonical = path.canonicalize().with_context(|| {
-      format!("failed to canonicalize path '{}'", path.display())
+  ) -> Result<SnapshotDocument, Error> {
+    let canonical = path.canonicalize().map_err(|source| {
+      Error::Canonicalize {
+        path: path.to_owned(),
+        source,
+      }
     })?;
     let store_path = canonical
       .into_os_string()
       .into_string()
-      .map_err(|path| report!("path '{}' is not valid unicode", path.display()))
+      .map_err(|path| Error::NotUnicode(path.into()))
       .and_then(StorePath::try_from)?;
     let snapshot = query_store_snapshot_with_backend(&self.0, &store_path)?;
     Ok(SnapshotDocument {
