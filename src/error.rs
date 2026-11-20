@@ -6,6 +6,8 @@ use std::{
 use std::{
   io,
   path::PathBuf,
+  process::ExitStatus,
+  string::FromUtf8Error,
 };
 
 #[cfg(feature = "store")] use crate::StorePath;
@@ -36,14 +38,33 @@ pub enum Error {
   #[cfg(feature = "store")]
   ClosureQuery {
     path:   StorePath,
-    source: Box<dyn error::Error + Send + Sync>,
+    source: Box<Self>,
   },
   /// Querying the packages a store path selects failed.
   #[cfg(feature = "store")]
   SelectionQuery {
     path:   StorePath,
-    source: Box<dyn error::Error + Send + Sync>,
+    source: Box<Self>,
   },
+  /// A Nix command cannot be run.
+  #[cfg(feature = "store")]
+  RunCommand { command: String, source: io::Error },
+  /// A Nix command exited unsuccessfully.
+  #[cfg(feature = "store")]
+  CommandFailed {
+    command: String,
+    status:  ExitStatus,
+    stderr:  String,
+  },
+  /// A Nix command printed invalid UTF-8.
+  #[cfg(feature = "store")]
+  CommandNotUtf8 {
+    command: String,
+    source:  FromUtf8Error,
+  },
+  /// A Nix command printed a line `dix` cannot parse.
+  #[cfg(feature = "store")]
+  UnexpectedOutput { command: String, line: String },
 }
 
 impl fmt::Display for Error {
@@ -92,6 +113,30 @@ impl fmt::Display for Error {
           path.display()
         )
       },
+      #[cfg(feature = "store")]
+      Self::RunCommand { command, .. } => {
+        write!(f, "failed to run {command}")
+      },
+      #[cfg(feature = "store")]
+      Self::CommandFailed {
+        command,
+        status,
+        stderr,
+      } => {
+        write!(f, "{command} exited with {status}")?;
+        if !stderr.is_empty() {
+          write!(f, ": {stderr}")?;
+        }
+        Ok(())
+      },
+      #[cfg(feature = "store")]
+      Self::CommandNotUtf8 { command, .. } => {
+        write!(f, "output of {command} is not valid UTF-8")
+      },
+      #[cfg(feature = "store")]
+      Self::UnexpectedOutput { command, line } => {
+        write!(f, "{command} printed an unexpected line: '{line}'")
+      },
     }
   }
 }
@@ -101,10 +146,14 @@ impl error::Error for Error {
     match self {
       Self::InvalidSnapshot(source) => Some(source),
       #[cfg(feature = "store")]
-      Self::Canonicalize { source, .. } => Some(source),
+      Self::Canonicalize { source, .. } | Self::RunCommand { source, .. } => {
+        Some(source)
+      },
       #[cfg(feature = "store")]
       Self::ClosureQuery { source, .. }
       | Self::SelectionQuery { source, .. } => Some(source.as_ref()),
+      #[cfg(feature = "store")]
+      Self::CommandNotUtf8 { source, .. } => Some(source),
       _ => None,
     }
   }

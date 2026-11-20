@@ -24,8 +24,8 @@ use crate::{
 /// # Errors
 ///
 /// Returns an error if the closure cannot be queried.
-pub fn closure_size(
-  backend: &dyn StoreBackend,
+pub fn closure_size<B: StoreBackend>(
+  backend: &B,
   path: &StorePath,
 ) -> Result<Size> {
   Ok(Size::from_bytes(
@@ -412,9 +412,11 @@ mod tests {
     let db_path = db.db_path().to_string_lossy().to_string();
     let unregistered = store_path(&fixtures::store_path("unregistered-1.0"));
 
-    let conn = DbConnection::open(&db_path).unwrap();
+    let store = crate::store::Store {
+      db: Some(DbConnection::open(&db_path).unwrap()),
+    };
     let error =
-      crate::store::query_store_snapshot_with_backend(&conn, &unregistered)
+      crate::store::query_store_snapshot_with_backend(&store, &unregistered)
         .unwrap_err()
         .to_string();
     assert!(error.contains("is not a valid store path"));

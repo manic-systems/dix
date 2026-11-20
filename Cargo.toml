@@ -34,14 +34,14 @@ version          = "0.3"
 cli = [
   "dep:caress",
   "dep:misstep",
-  "dep:pound",
-  "dep:tracing-subscriber",
   "misstep/color",
   "misstep/pretty",
+  "dep:pound",
+  "dep:tracing-subscriber",
   "store",
 ]
 default = [ "cli", "store" ]
-store = [ "dep:misstep", "dep:rusqlite" ]
+store = [ "dep:rusqlite" ]
 
 [[bin]]
 name              = "dix"
@@ -49,6 +49,7 @@ path              = "src/main.rs"
 required-features = [ "cli" ]
 
 [dev-dependencies]
+misstep  = "0.4.1"
 proptest = "1.6.0"
 tempfile = "3.10.0"
 

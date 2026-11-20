@@ -6,15 +6,10 @@ use std::{
   process::Command,
 };
 
-use misstep::{
-  Result,
-  ResultExt as _,
-  bail,
-  report,
-};
 use size::Size;
 
 use crate::{
+  Error,
   StorePath,
   StorePathInfo,
   store::StoreBackend,
@@ -34,6 +29,11 @@ impl Display for CommandBackend {
   }
 }
 
+/// Renders `command` for error messages.
+fn describe(command: &Command) -> String {
+  format!("{command:?}")
+}
+
 /// Runs a Nix command.
 ///
 /// # Returns
@@ -44,21 +44,27 @@ impl Display for CommandBackend {
 ///
 /// Returns an error if the command cannot be run, exits unsuccessfully, or
 /// prints invalid UTF-8.
-fn run(command: &mut Command) -> Result<String> {
-  let output = command
-    .output()
-    .with_context(|| format!("failed to execute {command:?}"))?;
+fn run(command: &mut Command) -> Result<String, Error> {
+  let output = command.output().map_err(|source| {
+    Error::RunCommand {
+      command: describe(command),
+      source,
+    }
+  })?;
   if !output.status.success() {
-    bail!(
-      "{command:?} exited with {status}: {err}",
-      status = output.status,
-      err = String::from_utf8_lossy(&output.stderr).trim()
-    );
+    return Err(Error::CommandFailed {
+      command: describe(command),
+      status:  output.status,
+      stderr:  String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    });
   }
 
-  String::from_utf8(output.stdout)
-    .with_context(|| format!("{command:?} printed invalid UTF-8"))
-    .erase()
+  String::from_utf8(output.stdout).map_err(|source| {
+    Error::CommandNotUtf8 {
+      command: describe(command),
+      source,
+    }
+  })
 }
 
 /// Parses Nix command output listing one store path per line.
@@ -70,17 +76,25 @@ fn run(command: &mut Command) -> Result<String> {
 /// # Errors
 ///
 /// Returns an error if a line is not a store path.
-fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
+fn parse_store_path_output(
+  command: &Command,
+  output: &str,
+) -> Result<Vec<StorePath>, Error> {
   output
     .lines()
     .map(|line| {
       StorePath::try_from(line.to_owned())
-        .with_context(|| {
-          format!("encountered invalid path in nix command output: {line}")
-        })
-        .erase()
+        .map_err(|_| unexpected_output(command, line))
     })
     .collect()
+}
+
+/// Reports `line` as unexpected output of `command`.
+fn unexpected_output(command: &Command, line: &str) -> Error {
+  Error::UnexpectedOutput {
+    command: describe(command),
+    line:    line.to_owned(),
+  }
 }
 
 /// Parses `nix path-info --size` output, one path and NAR size per line.
@@ -92,21 +106,23 @@ fn parse_store_path_output(output: &str) -> Result<Vec<StorePath>> {
 /// # Errors
 ///
 /// Returns an error if a line lacks a column, or has an invalid path or size.
-fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
+fn parse_path_info_size_output(
+  command: &Command,
+  output: &str,
+) -> Result<Vec<StorePathInfo>, Error> {
   let mut infos = Vec::new();
   for line in output.lines() {
+    let unexpected = || unexpected_output(command, line);
     let mut columns = line.split_whitespace();
-    let path = columns
-      .next()
-      .ok_or_else(|| report!("missing path in nix path-info output line"))?;
+    let path = columns.next().ok_or_else(unexpected)?;
     let bytes = columns
       .next()
-      .ok_or_else(|| report!("missing NAR size in nix path-info output line"))?
-      .parse::<i64>()
-      .context("failed to parse NAR size from nix path-info output")?;
+      .and_then(|bytes| bytes.parse::<i64>().ok())
+      .ok_or_else(unexpected)?;
 
     infos.push(StorePathInfo {
-      path:     StorePath::try_from(path.to_owned())?,
+      path:     StorePath::try_from(path.to_owned())
+        .map_err(|_| unexpected())?,
       nar_size: Size::from_bytes(bytes),
     });
   }
@@ -114,27 +130,64 @@ fn parse_path_info_size_output(output: &str) -> Result<Vec<StorePathInfo>> {
   Ok(infos)
 }
 
+/// Checks whether `path` is registered as valid in the Nix store.
+///
+/// # Errors
+///
+/// Returns an error if `nix-store --check-validity` fails.
+fn is_valid(path: &StorePath) -> Result<bool, Error> {
+  // With `--print-invalid`, invalid paths are printed instead of failing.
+  let invalid = run(
+    Command::new("nix-store")
+      .args(["--check-validity", "--print-invalid"])
+      .arg(path.as_os_str()),
+  )?;
+  Ok(invalid.trim().is_empty())
+}
+
 impl StoreBackend for CommandBackend {
+  type Error = Error;
+
   fn query_system_derivations(
     &self,
     system: &StorePath,
-  ) -> Result<Vec<StorePath>> {
-    parse_store_path_output(&run(
-      Command::new("nix-store")
-        .args(["--query", "--references"])
-        .arg(system.join("sw")),
-    )?)
+  ) -> Result<Vec<StorePath>, Error> {
+    let mut command = Command::new("nix-store");
+    command
+      .args(["--query", "--references"])
+      .arg(system.join("sw"));
+    let output = run(&mut command)?;
+    parse_store_path_output(&command, &output)
   }
 
   fn query_closure_path_info(
     &self,
     path: &StorePath,
-  ) -> Result<Vec<StorePathInfo>> {
-    parse_path_info_size_output(&run(
-      Command::new("nix")
-        .args(["path-info", "--recursive", "--size"])
-        .arg(path.as_os_str()),
-    )?)
+  ) -> Result<Vec<StorePathInfo>, Error> {
+    let mut command = Command::new("nix");
+    command
+      .args(["path-info", "--recursive", "--size"])
+      .arg(path.as_os_str());
+    match run(&mut command) {
+      Ok(output) => parse_path_info_size_output(&command, &output),
+      // An empty closure tells the caller the path is not valid, as the
+      // database backend does. If validity cannot be checked either, the
+      // original failure is the more useful error.
+      Err(error @ Error::CommandFailed { .. }) => {
+        match is_valid(path) {
+          Ok(false) => Ok(Vec::new()),
+          Ok(true) => Err(error),
+          Err(validity_error) => {
+            tracing::debug!(
+              validity_error = super::error_chain(&validity_error),
+              "failed to check path validity"
+            );
+            Err(error)
+          },
+        }
+      },
+      Err(error) => Err(error),
+    }
   }
 }
 
@@ -158,7 +211,8 @@ mod tests {
 
   #[test]
   fn parse_store_path_output_reads_paths() {
-    let mut paths = parse_store_path_output(FAKE_PATHS).unwrap();
+    let mut paths =
+      parse_store_path_output(&Command::new("nix-store"), FAKE_PATHS).unwrap();
     paths.sort();
     let mut expected = FAKE_PATHS
       .lines()
@@ -171,7 +225,9 @@ mod tests {
 
   #[test]
   fn parse_path_info_size_output_reads_nar_sizes() {
-    let info = parse_path_info_size_output(&path_info_output()).unwrap();
+    let info =
+      parse_path_info_size_output(&Command::new("nix"), &path_info_output())
+        .unwrap();
     assert_eq!(info.len(), FAKE_PATHS.lines().count());
     assert_eq!(info[0].nar_size, Size::from_bytes(1));
     assert_eq!(info[2].nar_size, Size::from_bytes(3));

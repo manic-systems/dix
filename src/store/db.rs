@@ -3,13 +3,10 @@ use std::fmt::{
   Display,
 };
 
-use misstep::{
-  Result,
-  ResultExt as _,
-};
 use rusqlite::{
   Connection,
   OpenFlags,
+  types::Type,
 };
 use size::Size;
 
@@ -40,7 +37,7 @@ impl DbConnection {
   /// # Errors
   ///
   /// Returns an error if the database cannot be opened or configured.
-  pub fn open(path: impl AsRef<str>) -> Result<Self> {
+  pub fn open(path: impl AsRef<str>) -> rusqlite::Result<Self> {
     let path = path.as_ref().to_owned();
     let conn = open_connection(&path)?;
     Ok(Self { path, conn })
@@ -48,30 +45,31 @@ impl DbConnection {
 }
 
 impl StoreBackend for DbConnection {
+  type Error = rusqlite::Error;
+
   fn query_system_derivations(
     &self,
     system: &StorePath,
-  ) -> Result<Vec<StorePath>> {
+  ) -> rusqlite::Result<Vec<StorePath>> {
     query_store_paths(&self.conn, queries::QUERY_SYSTEM_DERIVATIONS, system)
   }
 
   fn query_closure_path_info(
     &self,
     path: &StorePath,
-  ) -> Result<Vec<StorePathInfo>> {
+  ) -> rusqlite::Result<Vec<StorePathInfo>> {
     query_store_path_info(&self.conn, path)
   }
 }
 
-fn open_connection(path: &str) -> Result<Connection> {
+fn open_connection(path: &str) -> rusqlite::Result<Connection> {
   tracing::debug!(database_path = path, "opening sqlite connection");
   let inner = Connection::open_with_flags(
     path,
     OpenFlags::SQLITE_OPEN_READ_ONLY // We only run queries, safeguard against corrupting the DB.
       | OpenFlags::SQLITE_OPEN_NO_MUTEX // Part of the default flags, rusqlite takes care of locking anyways.
       | OpenFlags::SQLITE_OPEN_URI,
-  )
-  .with_context(|| format!("failed to connect to Nix database at {path}"))?;
+  )?;
   tracing::debug!(
     database_path = path,
     "sqlite connection opened successfully"
@@ -103,15 +101,13 @@ fn open_connection(path: &str) -> Result<Connection> {
   //
   // [0]: 256MB, enough to fit the whole DB (at least on my system - Dragyx).
   // [1]: Always store temporary tables in memory.
-  inner
-    .execute_batch(
-      "
+  inner.execute_batch(
+    "
         PRAGMA mmap_size=268435456; -- See [0].
         PRAGMA temp_store=2; -- See [1].
         PRAGMA query_only;
       ",
-    )
-    .with_context(|| format!("failed to cache Nix database at {path}"))?;
+  )?;
   Ok(inner)
 }
 
@@ -119,35 +115,35 @@ fn query_store_paths(
   conn: &Connection,
   query: &str,
   path: &StorePath,
-) -> Result<Vec<StorePath>> {
+) -> rusqlite::Result<Vec<StorePath>> {
   let mut query = conn.prepare_cached(query)?;
-  let rows = query.query_map([path.as_str()], |row| row.get::<_, String>(0))?;
+  query
+    .query_map([path.as_str()], |row| store_path(row.get(0)?))?
+    .collect()
+}
 
-  let mut paths = Vec::new();
-  for row in rows {
-    paths.push(StorePath::try_from(row?)?);
-  }
-
-  Ok(paths)
+/// Validates a store path read from the database.
+///
+/// # Errors
+///
+/// Returns a conversion error if `path` is not a store path.
+fn store_path(path: String) -> rusqlite::Result<StorePath> {
+  StorePath::try_from(path).map_err(|err| {
+    rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err))
+  })
 }
 
 fn query_store_path_info(
   conn: &Connection,
   path: &StorePath,
-) -> Result<Vec<StorePathInfo>> {
+) -> rusqlite::Result<Vec<StorePathInfo>> {
   let mut query = conn.prepare_cached(queries::QUERY_CLOSURE_PATH_INFO)?;
-  let rows = query.query_map([path.as_str()], |row| {
-    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-  })?;
-
-  let mut infos = Vec::new();
-  for row in rows {
-    let (path, nar_size) = row?;
-    infos.push(StorePathInfo {
-      path:     StorePath::try_from(path)?,
-      nar_size: Size::from_bytes(nar_size),
-    });
-  }
-
-  Ok(infos)
+  query
+    .query_map([path.as_str()], |row| {
+      Ok(StorePathInfo {
+        path:     store_path(row.get(0)?)?,
+        nar_size: Size::from_bytes(row.get::<_, i64>(1)?),
+      })
+    })?
+    .collect()
 }
