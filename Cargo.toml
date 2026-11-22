@@ -13,6 +13,7 @@ categories   = [ "command-line-utilities" ]
 include      = [ "CHANGELOG.md", "Cargo.lock", "Cargo.toml", "LICENSE.md", "README.md", "src/**" ]
 
 [dependencies]
+caress     = { optional = true, version = "0.3.0" }
 diff       = "0.1.13"
 misstep    = { features = [ "color", "pretty" ], version = "0.4.1" }
 pound      = { optional = true, version = "0.6.1" }
@@ -30,7 +31,7 @@ optional         = true
 version          = "0.3"
 
 [features]
-cli     = [ "dep:pound", "dep:tracing-subscriber", "store" ]
+cli     = [ "dep:caress", "dep:pound", "dep:tracing-subscriber", "store" ]
 default = [ "cli", "store" ]
 store   = [ "dep:rusqlite" ]
 

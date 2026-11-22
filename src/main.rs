@@ -203,6 +203,8 @@ enum OutputFormat {
 }
 
 fn main() -> ExitCode {
+  caress::handle(Cli::SPEC);
+
   let Cli {
     command,
     verbose,
