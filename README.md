@@ -59,6 +59,19 @@ The default profile is `/nix/var/nix/profiles/system`. Use `--profile PATH` for
 another unnumbered profile link, for example
 `dix last 3 --profile ~/.local/state/nix/profiles/profile`.
 
+## Completions
+
+The Nix package installs completions for Bash, Zsh, Fish and Nushell. To set
+completions up by hand, source the script dix prints.
+
+| Shell  | Setup                                                  |
+|--------|--------------------------------------------------------|
+| bash   | `source <(COMPLETE=bash dix)`                          |
+| zsh    | `COMPLETE=zsh dix > ~/.zfunc/_dix`, with it in `fpath` |
+| fish   | `COMPLETE=fish dix \| source`                          |
+| nu     | `COMPLETE=nu dix \| save dix.nu`, then `source` it     |
+| elvish | `eval (env COMPLETE=elvish dix \| slurp)`              |
+
 # Snapshots
 
 `dix snapshot <PATH>` prints the closure of a store path as JSON, so it can be
