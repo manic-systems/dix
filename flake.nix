@@ -58,10 +58,26 @@
 
             buildType = "release";
 
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            nativeBuildInputs = [
+              pkgs.installShellFiles
+              pkgs.pkg-config
+            ];
             buildInputs = [ pkgs.sqlite ];
 
             strictDeps = true;
+
+            postInstall = lib.optionalString (pkgs.stdenv.hostPlatform.emulatorAvailable pkgs.buildPackages) (
+              let
+                dix = "${pkgs.stdenv.hostPlatform.emulator pkgs.buildPackages} $out/bin/dix";
+              in
+              ''
+                installShellCompletion --cmd dix \
+                  --bash    <(COMPLETE=bash ${dix}) \
+                  --zsh     <(COMPLETE=zsh  ${dix}) \
+                  --fish    <(COMPLETE=fish ${dix}) \
+                  --nushell <(COMPLETE=nu   ${dix})
+              ''
+            );
           };
         }
       ) pkgsForEach;
