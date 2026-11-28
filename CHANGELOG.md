@@ -6,6 +6,14 @@ This is a changelog of the `dix` repository. It follows the
 
 ## Unreleased
 
+### Added
+
+- `SnapshotDocument::FORMAT_VERSION` exposes the snapshot format version.
+
+### Changed
+
+- The library returns its own `dix::Error` instead of `misstep::Report`.
+
 ## 3.0.0
 
 ### Added

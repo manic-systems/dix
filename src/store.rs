@@ -9,21 +9,16 @@ mod queries;
 #[cfg(test)] pub mod test_utils;
 
 use std::{
-  fmt::Display,
+  error,
   path::Path,
 };
 
 pub use db::DbConnection;
-use misstep::{
-  Result,
-  ResultExt as _,
-  bail,
-  report,
-};
 pub use nix_command::CommandBackend;
 use tracing::warn;
 
 use crate::{
+  Error,
   SnapshotDocument,
   StorePath,
   StorePathInfo,
@@ -43,22 +38,28 @@ pub const DATABASE_PATH: &str = "file:/nix/var/nix/db/db.sqlite";
 ///
 /// Returns an error if the backend cannot query the path, or the path is not
 /// a valid store path.
-pub fn query_store_snapshot_with_backend(
-  backend: &dyn StoreBackend,
+fn query_store_snapshot_with_backend(
+  backend: &impl StoreBackend<Error = Error>,
   path: &StorePath,
-) -> Result<StoreSnapshot> {
+) -> Result<StoreSnapshot, Error> {
   tracing::debug!(path = %path.display(), "querying closure path info");
-  let closure = backend.query_closure_path_info(path).with_context(|| {
-    format!("failed to query closure path info of '{}'", path.display())
+  let closure = backend.query_closure_path_info(path).map_err(|source| {
+    Error::ClosureQuery {
+      path:   path.clone(),
+      source: Box::new(source),
+    }
   })?;
   // The closure of a valid path contains at least the path itself.
   if closure.is_empty() {
-    bail!("'{}' is not a valid store path", path.display());
+    return Err(Error::PathNotValid(path.clone()));
   }
 
   tracing::debug!(path = %path.display(), "querying system derivations");
-  let selected = backend.query_system_derivations(path).with_context(|| {
-    format!("failed to query system derivations of '{}'", path.display())
+  let selected = backend.query_system_derivations(path).map_err(|source| {
+    Error::SelectionQuery {
+      path:   path.clone(),
+      source: Box::new(source),
+    }
   })?;
 
   Ok(StoreSnapshot { closure, selected })
@@ -69,7 +70,10 @@ pub fn query_store_snapshot_with_backend(
 /// It queries the Nix database, and falls back to Nix commands if the database
 /// cannot be opened or queried. Reuse one handle for several queries, so the
 /// database is opened only once.
-pub struct Store(CombinedStoreBackend);
+pub struct Store {
+  /// The Nix database, if it could be opened.
+  db: Option<DbConnection>,
+}
 
 impl Store {
   /// Opens the local Nix store.
@@ -79,7 +83,16 @@ impl Store {
   /// warning is logged and queries use Nix commands.
   #[must_use]
   pub fn open() -> Self {
-    Self(CombinedStoreBackend::open())
+    let db = DbConnection::open(DATABASE_PATH)
+      .inspect_err(|err| {
+        warn!(
+          "unable to open the Nix database at {DATABASE_PATH}, falling back: \
+           {}",
+          error_chain(err)
+        );
+      })
+      .ok();
+    Self { db }
   }
 
   /// Canonicalizes `path` and queries a
@@ -96,28 +109,76 @@ impl Store {
   pub fn query_snapshot_document(
     &self,
     path: &Path,
-  ) -> Result<SnapshotDocument> {
-    let canonical = path.canonicalize().with_context(|| {
-      format!("failed to canonicalize path '{}'", path.display())
+  ) -> Result<SnapshotDocument, Error> {
+    let canonical = path.canonicalize().map_err(|source| {
+      Error::Canonicalize {
+        path: path.to_owned(),
+        source,
+      }
     })?;
     let store_path = canonical
       .into_os_string()
       .into_string()
-      .map_err(|path| report!("path '{}' is not valid unicode", path.display()))
+      .map_err(|path| Error::NotUnicode(path.into()))
       .and_then(StorePath::try_from)?;
-    let snapshot = query_store_snapshot_with_backend(&self.0, &store_path)?;
+    let snapshot = query_store_snapshot_with_backend(self, &store_path)?;
     Ok(SnapshotDocument {
       path: store_path,
       snapshot,
     })
   }
+
+  /// Runs `query` on the database, if it is open.
+  ///
+  /// # Returns
+  ///
+  /// The query's result, or `None` if the database is not open or the query
+  /// failed, in which case a warning is logged.
+  fn query_db<T>(
+    &self,
+    path: &StorePath,
+    query: impl FnOnce(&DbConnection) -> rusqlite::Result<T>,
+  ) -> Option<T> {
+    let db = self.db.as_ref()?;
+    query(db)
+      .inspect_err(|err| {
+        warn!(
+          "failed to query '{}' with {db}, falling back: {}",
+          path.display(),
+          error_chain(err)
+        );
+      })
+      .ok()
+  }
 }
 
-/// Defines an interface for interacting with a Nix database.
-///
-/// This allows us to construct a backend that can fall back
-/// to e.g. shell commands should something go wrong.
-pub trait StoreBackend: Display {
+impl StoreBackend for Store {
+  type Error = Error;
+
+  fn query_system_derivations(
+    &self,
+    system: &StorePath,
+  ) -> Result<Vec<StorePath>, Error> {
+    self
+      .query_db(system, |db| db.query_system_derivations(system))
+      .map_or_else(|| CommandBackend.query_system_derivations(system), Ok)
+  }
+
+  fn query_closure_path_info(
+    &self,
+    path: &StorePath,
+  ) -> Result<Vec<StorePathInfo>, Error> {
+    self
+      .query_db(path, |db| db.query_closure_path_info(path))
+      .map_or_else(|| CommandBackend.query_closure_path_info(path), Ok)
+  }
+}
+
+/// Defines an interface for querying the Nix store.
+pub trait StoreBackend {
+  /// The error queries return.
+  type Error: error::Error + Send + Sync + 'static;
+
   /// Queries derivations selected by a system profile.
   ///
   /// # Errors
@@ -126,8 +187,12 @@ pub trait StoreBackend: Display {
   fn query_system_derivations(
     &self,
     system: &StorePath,
-  ) -> Result<Vec<StorePath>>;
+  ) -> Result<Vec<StorePath>, Self::Error>;
   /// Queries all dependencies of a store path with their NAR sizes.
+  ///
+  /// # Returns
+  ///
+  /// The closure of `path`, or an empty list if `path` is not valid.
   ///
   /// # Errors
   ///
@@ -136,183 +201,17 @@ pub trait StoreBackend: Display {
   fn query_closure_path_info(
     &self,
     path: &StorePath,
-  ) -> Result<Vec<StorePathInfo>>;
+  ) -> Result<Vec<StorePathInfo>, Self::Error>;
 }
 
-/// combines multiple store backends by falling back to the next one if the
-/// current one fails.
-///
-/// Queries try backends in order.
-pub struct CombinedStoreBackend {
-  /// The underlying store backend implementations.
-  backends: Vec<Box<dyn StoreBackend>>,
-}
-
-impl CombinedStoreBackend {
-  #[must_use]
-  pub fn new(backends: Vec<Box<dyn StoreBackend>>) -> Self {
-    Self { backends }
+/// Renders `error` and its sources, joined with `: `, for log messages.
+fn error_chain(error: &dyn error::Error) -> String {
+  let mut rendered = error.to_string();
+  let mut source = error.source();
+  while let Some(error) = source {
+    rendered.push_str(": ");
+    rendered.push_str(&error.to_string());
+    source = error.source();
   }
-
-  /// Tries the sqlite database first, then falls back to Nix commands.
-  fn open() -> Self {
-    let mut backends: Vec<Box<dyn StoreBackend>> = Vec::new();
-    match DbConnection::open(DATABASE_PATH) {
-      Ok(db) => backends.push(Box::new(db)),
-      Err(err) => warn!("Unable to open the Nix database, falling back: {err}"),
-    }
-    backends.push(Box::new(CommandBackend));
-    Self::new(backends)
-  }
-
-  // tries to execute a query until it succeeds or all backends have been tried
-  fn fallback_query<F, Ret>(&self, query: F, path: &StorePath) -> Result<Ret>
-  where
-    F: Fn(&dyn StoreBackend, &StorePath) -> Result<Ret>,
-  {
-    let mut combined_err: Option<misstep::Report> = None;
-    // attempt to cycle through backends until a successful query is made
-    for (i, backend) in self.backends.iter().enumerate() {
-      let res = query(backend.as_ref(), path);
-      match res {
-        Ok(_) => return res,
-        Err(err) => {
-          warn!(
-            "Failed to query path {path:?} on current backend {backend} \
-             ({i}): {}",
-            &err
-          );
-          combined_err = match combined_err {
-            Some(combined) => Some(combined.context(err)),
-            None => Some(err),
-          };
-        },
-      }
-    }
-    warn!("All store backends for path {path:?} failed");
-    Err(combined_err.unwrap_or_else(|| report!("No internal stores to query.")))
-  }
-}
-
-impl Display for CombinedStoreBackend {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "CombinedStoreBackend({} backends)", self.backends.len())
-  }
-}
-
-impl StoreBackend for CombinedStoreBackend {
-  fn query_system_derivations(
-    &self,
-    system: &StorePath,
-  ) -> Result<Vec<StorePath>> {
-    self.fallback_query(
-      |backend, system| backend.query_system_derivations(system),
-      system,
-    )
-  }
-
-  fn query_closure_path_info(
-    &self,
-    path: &StorePath,
-  ) -> Result<Vec<StorePathInfo>> {
-    self.fallback_query(
-      |backend, path| backend.query_closure_path_info(path),
-      path,
-    )
-  }
-}
-
-#[cfg(test)]
-mod test {
-  use std::fmt;
-
-  use size::Size;
-
-  use super::*;
-
-  fn dummy_path() -> StorePath {
-    StorePath::try_from(String::from(
-      "/nix/store/0123456789abcdefghijklmnopqrstuv-dummy",
-    ))
-    .unwrap()
-  }
-
-  struct MockStoreBackend {
-    name:       String,
-    fail_query: bool,
-  }
-
-  impl MockStoreBackend {
-    fn new(name: &str, fail_query: bool) -> Self {
-      Self {
-        name: name.to_string(),
-        fail_query,
-      }
-    }
-  }
-
-  impl Display for MockStoreBackend {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      write!(f, "MockStoreBackend({})", self.name)
-    }
-  }
-
-  impl StoreBackend for MockStoreBackend {
-    fn query_system_derivations(
-      &self,
-      _system: &StorePath,
-    ) -> Result<Vec<StorePath>> {
-      if self.fail_query {
-        Err(report!("Query failed"))
-      } else {
-        Ok(Vec::new())
-      }
-    }
-
-    fn query_closure_path_info(
-      &self,
-      _path: &StorePath,
-    ) -> Result<Vec<StorePathInfo>> {
-      if self.fail_query {
-        Err(report!("Query failed"))
-      } else {
-        Ok(vec![StorePathInfo {
-          path:     dummy_path(),
-          nar_size: Size::from_bytes(100),
-        }])
-      }
-    }
-  }
-
-  #[test]
-  fn test_query_fallback() {
-    let f1 = Box::new(MockStoreBackend::new("f1", true));
-    let f2 = Box::new(MockStoreBackend::new("f2", false));
-    let combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    let res = test_utils::closure_size(&combined, &dummy_path());
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), Size::from_bytes(100));
-  }
-
-  #[test]
-  fn test_path_query_fallback() {
-    let f1 = Box::new(MockStoreBackend::new("f1", true));
-    let f2 = Box::new(MockStoreBackend::new("f2", false));
-    let combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    let res = combined.query_system_derivations(&dummy_path());
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), Vec::new());
-  }
-
-  #[test]
-  fn test_query_all_fail() {
-    let f1 = Box::new(MockStoreBackend::new("f1", true));
-    let f2 = Box::new(MockStoreBackend::new("f2", true));
-    let combined = CombinedStoreBackend::new(vec![f1, f2]);
-
-    let res = test_utils::closure_size(&combined, &dummy_path());
-    assert!(res.is_err());
-  }
+  rendered
 }
