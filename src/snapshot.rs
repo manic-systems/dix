@@ -70,11 +70,6 @@ pub struct StoreSnapshot {
   pub selected: Vec<StorePath>,
 }
 
-/// Version of the [`SnapshotDocument`] JSON format.
-///
-/// Bump this whenever the format changes in a way older readers cannot handle.
-pub const SNAPSHOT_FORMAT_VERSION: u64 = 1;
-
 /// A snapshot of a single store path's closure.
 ///
 /// It serializes with the current format version, and is parsed with
@@ -101,7 +96,7 @@ impl Serialize for SnapshotDocument {
     serializer: S,
   ) -> std::result::Result<S::Ok, S::Error> {
     VersionedDocument {
-      version:  SNAPSHOT_FORMAT_VERSION,
+      version:  Self::FORMAT_VERSION,
       path:     &self.path,
       snapshot: &self.snapshot,
     }
@@ -110,6 +105,12 @@ impl Serialize for SnapshotDocument {
 }
 
 impl SnapshotDocument {
+  /// Version of the JSON format this `dix` reads and writes.
+  ///
+  /// Bump this whenever the format changes in a way older readers cannot
+  /// handle.
+  pub const FORMAT_VERSION: u64 = 1;
+
   /// Parses a document from JSON.
   ///
   /// The format version is checked before anything else, so documents written
@@ -123,7 +124,7 @@ impl SnapshotDocument {
   ///
   /// Returns [`Error::InvalidSnapshot`] if the input is not a valid snapshot
   /// document, and [`Error::UnsupportedSnapshotVersion`] if its format version
-  /// is not supported.
+  /// is not [`Self::FORMAT_VERSION`].
   pub fn from_json(input: &str) -> Result<Self, Error> {
     #[derive(Deserialize)]
     struct VersionProbe {
@@ -132,7 +133,7 @@ impl SnapshotDocument {
 
     let VersionProbe { version } =
       serde_json::from_str(input).map_err(Error::InvalidSnapshot)?;
-    if version != SNAPSHOT_FORMAT_VERSION {
+    if version != Self::FORMAT_VERSION {
       return Err(Error::UnsupportedSnapshotVersion(version));
     }
 
@@ -197,7 +198,7 @@ mod tests {
     assert_eq!(
       value,
       serde_json::json!({
-        "version": SNAPSHOT_FORMAT_VERSION,
+        "version": SnapshotDocument::FORMAT_VERSION,
         "path": "/nix/store/00000000000000000000000000000001-nixos-system-25.11",
         "closure": [
           {

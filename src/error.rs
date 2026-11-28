@@ -19,6 +19,9 @@ pub enum Error {
   /// The input is not a valid dix snapshot document.
   InvalidSnapshot(serde_json::Error),
   /// The snapshot document has a format version this `dix` does not support.
+  ///
+  /// The supported version is
+  /// [`SnapshotDocument::FORMAT_VERSION`](crate::SnapshotDocument::FORMAT_VERSION).
   UnsupportedSnapshotVersion(u64),
   /// A path cannot be canonicalized.
   #[cfg(feature = "store")]
@@ -58,7 +61,7 @@ impl fmt::Display for Error {
         write!(
           f,
           "unsupported dix snapshot format version {version} (supported: {})",
-          crate::snapshot::SNAPSHOT_FORMAT_VERSION
+          crate::SnapshotDocument::FORMAT_VERSION
         )
       },
       #[cfg(feature = "store")]
